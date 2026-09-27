@@ -1,11 +1,11 @@
 # PHARMA NEXUS V2 — FINAL PROJECT DOCUMENTATION
-**CITTA RISE — Problem 7: Smart Vendor Restocking & Bargaining Agent**
+**Pharma ERP Smart Vendor Restocking & Bargaining Agent**
 
 ---
 
 ## 1. Project Title
 * **Project Name:** Pharma Nexus V2
-* **Competition / Track:** CITTA RISE — Problem 7
+* **System Identity:** Pharma ERP Smart Vendor Restocking & Bargaining Agent
 * **Sub-Title:** Autonomous Smart Vendor Restocking & Adaptive Bargaining Agent
 * **Version:** 4.0.0 (Phases 0–9 Complete & Frozen)
 
@@ -568,7 +568,7 @@ Pharma Nexus is a stateful, action-oriented system integrated directly into an o
 
 ---
 
-## 26. Judge Q&A Reference Guide
+## 26. Technical & Architectural Q&A Reference Guide
 
 #### Q1: Why is this an agent and not a script?
 **A:** A script executes fixed linear code. Pharma Nexus maintains a typed `AgentState`, observes dynamic database state, reasons about multi-constraint trade-offs, plans actions, adapts proposal pricing based on counter-party responses across multiple rounds, and validates decisions through guardrails before execution.

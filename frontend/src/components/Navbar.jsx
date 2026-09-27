@@ -40,8 +40,8 @@ export default function Navbar({ activeTab, setActiveTab }) {
           <Activity size={19} />
         </div>
         <div className="brand-text">
-          <span className="brand-title">Pharma ERP</span>
-          <span className="brand-tag">Phase 1</span>
+          <span className="brand-title">Pharma Nexus</span>
+          <span className="brand-tag">V2</span>
         </div>
       </div>
 

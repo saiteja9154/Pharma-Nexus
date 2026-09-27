@@ -1,5 +1,5 @@
 # Pharma Nexus V2 💊🤖
-### CITTA RISE — Problem 7: Smart Vendor Restocking & Bargaining Agent
+### Pharma ERP Smart Vendor Restocking & Bargaining Agent
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18.3.1-61DAFB.svg?logo=react&logoColor=black)](https://reactjs.org/)
@@ -302,5 +302,5 @@ pharma-procurement-agent/
 ---
 
 ## 📄 License & Credits
-Developed for **CITTA RISE — Problem 7 (Smart Vendor Restocking & Bargaining Agent)**.  
+**Pharma Nexus V2 — Pharma ERP Smart Vendor Restocking & Bargaining Agent**  
 Built with FastAPI, React, Vite, SQLite, and Python.

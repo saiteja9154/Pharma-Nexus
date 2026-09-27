@@ -39,7 +39,7 @@ export default function App() {
           </main>
           <footer className="app-footer">
             <Activity size={13} />
-            <span>Pharma ERP Foundation (Phase 1) &middot; FastAPI + SQLite</span>
+            <span>Pharma Nexus V2 &middot; Pharma ERP Smart Vendor Restocking &amp; Bargaining Agent</span>
           </footer>
         </div>
       </div>

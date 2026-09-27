@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Pharma Nexus ERP API",
-    description="Smart Vendor Restocking & Procurement API (Phase 4 Adaptive Negotiation)",
+    description="Pharma Nexus V2 — Pharma ERP Smart Vendor Restocking & Bargaining API",
     version="4.0.0",
     lifespan=lifespan,
 )
