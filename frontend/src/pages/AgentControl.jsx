@@ -21,6 +21,7 @@ import {
   ShoppingCart,
   ShieldCheck,
   Check,
+  RefreshCw,
 } from 'lucide-react';
 
 const API_BASE = 'http://127.0.0.1:8000';
@@ -152,7 +153,7 @@ export default function AgentControl() {
             Autonomous Restocking, Bargaining & ERP Write-Back Orchestrator (Phase 6)
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           <button
             id="btn-run-agent"
             onClick={handleRunAgent}
@@ -160,11 +161,52 @@ export default function AgentControl() {
             disabled={running}
             style={{ padding: '0.75rem 1.5rem', fontSize: '0.95rem' }}
           >
-            <Play size={18} fill="currentColor" />
-            <span>{running ? 'StoreAgent Orchestrating...' : 'Run Store Procurement Agent'}</span>
+            {running ? (
+              <>
+                <RefreshCw size={18} className="spinner" />
+                <span>StoreAgent Orchestrating...</span>
+              </>
+            ) : (
+              <>
+                <Play size={18} fill="currentColor" />
+                <span>Run Store Procurement Agent</span>
+              </>
+            )}
           </button>
         </div>
       </div>
+
+      {/* Run Execution Metadata Banner */}
+      {agentResult && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'var(--bg-subtle)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.75rem 1.25rem',
+            marginBottom: '1.25rem',
+            fontSize: '0.85rem',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span className="badge badge-green font-mono" style={{ fontWeight: 800 }}>
+              <CheckCircle2 size={13} />
+              FRESH SQLITE RUN
+            </span>
+            <span style={{ color: 'var(--text-muted)' }}>
+              Run ID: <strong className="font-mono" style={{ color: '#38bdf8' }}>{agentResult.run_id ? agentResult.run_id.slice(0, 8) : 'ACTIVE'}</strong>
+            </span>
+          </div>
+          <div style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>
+            Started: {agentResult.timestamp ? new Date(agentResult.timestamp).toLocaleTimeString() : 'Just now'} &bull; Status: <strong style={{ color: '#34d399', textTransform: 'uppercase' }}>{agentResult.status}</strong>
+          </div>
+        </div>
+      )}
 
       {errorMsg && (
         <div className="error-box">
@@ -244,6 +286,7 @@ export default function AgentControl() {
             const best = med.best_offer || med.negotiation?.best_offer;
             const isAccepted = med.decision === 'ACCEPT' && med.validation_result?.valid;
             const hasPO = med.po && med.po.po_id;
+            const isHealthy = med.decision === 'NO_PROCUREMENT';
 
             return (
               <div key={med.med_id} className="card" id={`med-card-${med.med_id}`}>
@@ -262,9 +305,15 @@ export default function AgentControl() {
                     <span className="badge badge-blue">
                       Stock: {med.current_stock} / Reorder: {med.reorder_point}
                     </span>
-                    <span className="badge badge-purple" style={{ fontWeight: 700 }}>
-                      Required: {med.required_qty} units
-                    </span>
+                    {med.required_qty > 0 ? (
+                      <span className="badge badge-purple" style={{ fontWeight: 700 }}>
+                        Required: {med.required_qty} units
+                      </span>
+                    ) : (
+                      <span className="badge badge-green" style={{ fontWeight: 700 }}>
+                        Adequate Stock (0 Required)
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -370,10 +419,33 @@ export default function AgentControl() {
                         )}
                       </div>
                     </div>
+                  ) : isHealthy ? (
+                    <div
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.08)',
+                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1rem 1.25rem',
+                        marginBottom: '1.25rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <CheckCircle2 size={22} color="#34d399" />
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#34d399', fontSize: '0.95rem' }}>
+                          Adequate Stock &mdash; No Procurement Required
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                          {med.decision_reason} (Stock {med.current_stock} &gt;= Reorder {med.reorder_point}). Expiry: {med.expiry?.expiry_days_left} days left.
+                        </p>
+                      </div>
+                    </div>
                   ) : (
                     <div className="error-box" style={{ marginBottom: '1.25rem' }}>
                       <AlertCircle size={18} />
-                      <span>{med.decision_reason || 'No procurement required.'}</span>
+                      <span>{med.decision_reason || 'No feasible vendor available.'}</span>
                     </div>
                   )}
 

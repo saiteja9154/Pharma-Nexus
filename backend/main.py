@@ -94,6 +94,9 @@ class AgentLogEntry(BaseModel):
 
 
 class ProcurementStartResponse(BaseModel):
+    run_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    completed_at: Optional[str] = None
     status: str
     medicines_evaluated: int
     procurement_needed_count: int
@@ -336,6 +339,45 @@ def trigger_procurement():
     agent = StoreAgent()
     result = agent.run()
     return result
+
+
+@app.post("/negotiation/run", response_model=ProcurementStartResponse)
+@app.post("/procurement/negotiate", response_model=ProcurementStartResponse)
+def trigger_negotiation():
+    """
+    Dedicated Negotiation execution endpoint.
+    Performs fresh SQLite inventory read, candidate quote discovery, vendor selection,
+    and executes multi-round bargaining protocol & deal validation.
+    """
+    agent = StoreAgent()
+    result = agent.run()
+    return result
+
+
+@app.get("/procurement/status")
+@app.get("/agent/status")
+def get_agent_status():
+    """Get current agent readiness status and database summary."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    inv_count = cursor.execute("SELECT COUNT(*) FROM inventory").fetchone()[0]
+    vendor_count = cursor.execute("SELECT COUNT(*) FROM vendors").fetchone()[0]
+    po_count = cursor.execute("SELECT COUNT(*) FROM purchase_orders").fetchone()[0]
+    conn.close()
+    return {
+        "status": "ready",
+        "inventory_count": inv_count,
+        "vendor_count": vendor_count,
+        "purchase_orders_count": po_count,
+    }
+
+
+@app.post("/database/seed")
+@app.post("/database/reset")
+def reset_database_endpoint():
+    """Reset SQLite database to deterministic Phase 1 baseline seed data."""
+    seed_db()
+    return {"success": True, "message": "Database reset and seeded successfully."}
 
 
 @app.post("/procurement/execute", response_model=ProcurementExecuteResponse)

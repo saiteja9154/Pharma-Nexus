@@ -5,6 +5,8 @@ for pharmacy inventory evaluation, reorder detection, demand calculation, expiry
 deterministic vendor quote aggregation, multi-factor vendor selection, and adaptive bargaining.
 """
 
+import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
@@ -138,6 +140,9 @@ class StoreAgent:
     ):
         self.db_path = db_path
         self.safety_days = safety_days
+        self.run_id: str = str(uuid.uuid4())
+        self.started_at: str = datetime.now(timezone.utc).isoformat()
+        self.completed_at: Optional[str] = None
         self.states: Dict[int, AgentState] = {}
         self.actions_history: List[AgentAction] = []
         self.logs: List[Dict[str, Any]] = []
@@ -900,32 +905,51 @@ class StoreAgent:
         else:
             # Stock is adequate
             exp_action = AgentAction(
-                action=AgentActionType.CHECK_EXPIRY.value,
-                medicine_id=med_id,
-                reason="Check expiry on adequate stock.",
-                params={"expiry_date": expiry_date, "daily_sales": daily_sales},
-            )
+                 action=AgentActionType.CHECK_EXPIRY.value,
+                 medicine_id=med_id,
+                 reason="Check expiry on adequate stock.",
+                 params={"expiry_date": expiry_date, "daily_sales": daily_sales},
+             )
             expiry_result = check_expiry(
-                expiry_date_str=expiry_date,
-                daily_sales=daily_sales,
-                lead_time_days=lead_time_days,
-            )
+                 expiry_date_str=expiry_date,
+                 daily_sales=daily_sales,
+                 lead_time_days=lead_time_days,
+             )
             exp_action.result = expiry_result
             self.record_action(exp_action)
+
+            # Retrieve candidate catalogue quotes for reference
+            raw_quotes = get_vendor_quotes(
+                med_id=med_id,
+                required_qty=0,
+                db_path=self.db_path,
+            )
+            scored_quotes = score_quotes(raw_quotes, expiry_safe_qty=expiry_result.get("expiry_safe_qty"))
 
             state.required_qty = 0
             state.constraints = {
                 "safety_days": self.safety_days,
                 "expiry": expiry_result,
             }
-            state.vendor_quotes = []
+            state.vendor_quotes = scored_quotes
             state.selected_vendor = None
-            state.negotiation = {}
+            state.negotiation = {
+                "status": "NO_PROCUREMENT_REQUIRED",
+                "reason": f"Current stock ({current_stock}) is at or above reorder point ({reorder_point}).",
+            }
             state.negotiation_history = []
             state.best_offer = None
             state.validation_result = {
                 "valid": True,
-                "checks": {},
+                "checks": {
+                    "required_qty": True,
+                    "moq": True,
+                    "expiry": True,
+                    "price": True,
+                    "delivery": True,
+                    "vendor": True,
+                    "negotiation_status": True,
+                },
                 "failed_checks": [],
                 "reason": "Current stock is at or above reorder point. No procurement required.",
             }
@@ -951,6 +975,9 @@ class StoreAgent:
         Score offers -> Select optimal vendor -> Negotiate adaptive terms ->
         Independently validate deal -> Formulate final decision -> Maintain AgentState.
         """
+        self.run_id = str(uuid.uuid4())
+        self.started_at = datetime.now(timezone.utc).isoformat()
+        self.completed_at = None
         self.logs.clear()
         self.actions_history.clear()
         self.states.clear()
@@ -975,7 +1002,11 @@ class StoreAgent:
             inventory_items = [i for i in inventory_items if i["med_id"] == target_med_id]
             if not inventory_items:
                 self.log("ERROR", f"Medicine with med_id={target_med_id} not found in inventory.")
+                self.completed_at = datetime.now(timezone.utc).isoformat()
                 return {
+                    "run_id": self.run_id,
+                    "timestamp": self.started_at,
+                    "completed_at": self.completed_at,
                     "status": "error",
                     "message": f"Medicine med_id={target_med_id} not found.",
                     "medicines": [],
@@ -1006,6 +1037,8 @@ class StoreAgent:
             (s.savings.get("savings", 0.0) if s.savings else 0.0) for s in self.states.values()
         )
 
+        self.completed_at = datetime.now(timezone.utc).isoformat()
+
         self.log(
             "COMPLETE",
             f"Phase 5 evaluation, negotiation & validation completed. {procurement_count} items evaluated, "
@@ -1014,6 +1047,9 @@ class StoreAgent:
 
         # Build structured agent result
         return {
+            "run_id": self.run_id,
+            "timestamp": self.started_at,
+            "completed_at": self.completed_at,
             "status": "completed",
             "medicines_evaluated": len(self.states),
             "procurement_needed_count": procurement_count,

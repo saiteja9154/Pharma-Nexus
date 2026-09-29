@@ -512,3 +512,106 @@ def test_explicit_acceptance_flow():
     assert state.best_offer["quantity"] == 250
     assert state.best_offer["unit_price"] in [7.86, 7.87]
     assert state.best_offer["savings"] > 0
+
+
+def test_agent_run_id_unique_per_execution():
+    """Verify each StoreAgent.run() execution generates a unique run_id and timestamps."""
+    agent = StoreAgent()
+    res1 = agent.run()
+    assert "run_id" in res1 and res1["run_id"]
+    assert "timestamp" in res1 and res1["timestamp"]
+    assert "completed_at" in res1 and res1["completed_at"]
+
+    res2 = agent.run()
+    assert "run_id" in res2 and res2["run_id"]
+    assert res1["run_id"] != res2["run_id"]
+
+
+def test_negotiation_run_endpoint():
+    """Verify POST /negotiation/run executes fresh bargaining and returns run context & savings."""
+    res = client.post("/negotiation/run")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "completed"
+    assert "run_id" in data and data["run_id"]
+    assert "timestamp" in data and data["timestamp"]
+    assert data["medicines_evaluated"] == 3
+    assert data["negotiation_accepted_count"] == 3
+    assert data["total_savings"] > 0
+    for med in data["medicines"]:
+        assert med["negotiation"] is not None
+        assert med["negotiation"]["status"] == "ACCEPTED"
+        assert med["best_offer"] is not None
+        assert med["best_offer"]["unit_price"] > 0
+        assert med["best_offer"]["savings"] > 0
+
+
+def test_fresh_database_read_on_repeated_execution():
+    """
+    Verify the StoreAgent evaluates fresh database state on repeated runs:
+      Run 1: Low stock (40 < 50) -> procurement required (calculated need 100, vendor MOQ 250), decision ACCEPT.
+      Execute PO -> stock updated to 290.
+      Run 2: Healthy stock (290 >= 50) -> NO_PROCUREMENT, 0 needed.
+      Update stock to 20 (< 50) -> Run 3: procurement required (calculated need 120), decision ACCEPT.
+    """
+    # 1. Run 1: Low stock
+    res1 = client.post("/procurement/start")
+    assert res1.status_code == 200
+    data1 = res1.json()
+    p1 = next(m for m in data1["medicines"] if m["med_id"] == 1)
+    assert p1["current_stock"] == 40
+    assert p1["required_qty"] == 100
+    assert p1["decision"] == "ACCEPT"
+
+    # 2. Execute PO for med 1
+    exec_res = client.post("/procurement/execute", json={"medicine_id": 1})
+    assert exec_res.status_code == 200
+    exec_data = exec_res.json()
+    assert exec_data["success"] is True
+    assert exec_data["inventory"]["after"] == 290
+
+    # 3. Run 2: Fresh query on updated DB shows stock=290, NO_PROCUREMENT
+    res2 = client.post("/procurement/start")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["run_id"] != data1["run_id"]
+    p2 = next(m for m in data2["medicines"] if m["med_id"] == 1)
+    assert p2["current_stock"] == 290
+    assert p2["required_qty"] == 0
+    assert p2["procurement_needed"] is False
+    assert p2["decision"] == "NO_PROCUREMENT"
+
+    # 4. Lower stock in DB to 20
+    upd_res = client.put("/inventory/1", json={
+        "current_stock": 20,
+        "reorder_point": 50,
+        "daily_sales": 20,
+        "lead_time_days": 5,
+        "expiry_date": "2026-12-31"
+    })
+    assert upd_res.status_code == 200
+
+    # 5. Run 3: Fresh query on new deficit shows stock=20, need=120, decision ACCEPT
+    res3 = client.post("/procurement/start")
+    assert res3.status_code == 200
+    data3 = res3.json()
+    assert data3["run_id"] != data2["run_id"]
+    p3 = next(m for m in data3["medicines"] if m["med_id"] == 1)
+    assert p3["current_stock"] == 20
+    assert p3["required_qty"] == 120
+    assert p3["procurement_needed"] is True
+    assert p3["decision"] == "ACCEPT"
+
+
+def test_agent_status_and_database_reset_endpoints():
+    """Verify GET /agent/status and POST /database/reset work as expected."""
+    stat_res = client.get("/agent/status")
+    assert stat_res.status_code == 200
+    stat = stat_res.json()
+    assert stat["status"] == "ready"
+    assert stat["inventory_count"] == 3
+
+    reset_res = client.post("/database/reset")
+    assert reset_res.status_code == 200
+    assert reset_res.json()["success"] is True
+
