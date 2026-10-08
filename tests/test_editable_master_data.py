@@ -56,7 +56,7 @@ def test_create_medicine_success():
     data = response.json()
     assert data["success"] is True
     assert data["medicine"]["name"] == "Amoxicillin 500mg"
-    assert data["medicine"]["med_id"] == 4  # 4th medicine after 1, 2, 3
+    assert data["medicine"]["med_id"] == 19  # 19th medicine after 1-18
     assert data["medicine"]["current_stock"] == 10
     assert data["medicine"]["reorder_point"] == 30
     assert data["medicine"]["daily_sales"] == 5
@@ -68,7 +68,7 @@ def test_create_medicine_success():
     row = conn.execute("SELECT * FROM inventory WHERE name = 'Amoxicillin 500mg'").fetchone()
     conn.close()
     assert row is not None
-    assert row["med_id"] == 4
+    assert row["med_id"] == 19
     assert row["current_stock"] == 10
 
 
@@ -91,7 +91,7 @@ def test_create_medicine_invalid_values_rejection():
     """Verify POST /inventory rejects negative values or empty names."""
     # Negative stock
     r1 = client.post("/inventory", json={
-        "name": "Ibuprofen",
+        "name": "Ibuprofen Extra",
         "current_stock": -5,
         "reorder_point": 20,
         "daily_sales": 5,
@@ -113,7 +113,7 @@ def test_create_medicine_invalid_values_rejection():
 
     # Bad date format
     r3 = client.post("/inventory", json={
-        "name": "Ibuprofen",
+        "name": "Ibuprofen Extra",
         "current_stock": 10,
         "reorder_point": 20,
         "daily_sales": 5,
@@ -134,14 +134,14 @@ def test_create_vendor_success():
     data = response.json()
     assert data["success"] is True
     assert data["vendor"]["name"] == "Apex Pharma Logistics"
-    assert data["vendor"]["vendor_id"] == 4  # 4th vendor after 1, 2, 3
+    assert data["vendor"]["vendor_id"] == 7  # 7th vendor after 1-6
 
     # Verify SQLite directly
     conn = get_db_connection()
     row = conn.execute("SELECT * FROM vendors WHERE name = 'Apex Pharma Logistics'").fetchone()
     conn.close()
     assert row is not None
-    assert row["vendor_id"] == 4
+    assert row["vendor_id"] == 7
 
 
 def test_create_vendor_duplicate_rejection():
@@ -158,19 +158,20 @@ def test_create_vendor_duplicate_rejection():
 def test_create_vendor_offer_success():
     """Verify POST /vendor-offers successfully registers a new contract offer."""
     # First create a new medicine
-    client.post("/inventory", json={
-        "name": "Amoxicillin",
+    res = client.post("/inventory", json={
+        "name": "Doxycycline 100mg",
         "current_stock": 10,
         "reorder_point": 30,
         "daily_sales": 5,
         "lead_time_days": 3,
         "expiry_date": "2027-01-30",
     })
+    new_med_id = res.json()["medicine"]["med_id"]
 
-    # Add offer for Amoxicillin from Vendor B (vendor_id: 2, med_id: 4)
+    # Add offer for Doxycycline from Vendor B (vendor_id: 2)
     payload = {
         "vendor_id": 2,
-        "med_id": 4,
+        "med_id": new_med_id,
         "base_price": 5.50,
         "min_qty": 40,
         "delivery_days": 2,
@@ -181,15 +182,15 @@ def test_create_vendor_offer_success():
     assert data["success"] is True
     assert data["offer"]["vendor_id"] == 2
     assert data["offer"]["vendor_name"] == "Vendor B"
-    assert data["offer"]["med_id"] == 4
-    assert data["offer"]["med_name"] == "Amoxicillin"
+    assert data["offer"]["med_id"] == new_med_id
+    assert data["offer"]["med_name"] == "Doxycycline 100mg"
     assert data["offer"]["base_price"] == 5.50
     assert data["offer"]["min_qty"] == 40
     assert data["offer"]["delivery_days"] == 2
 
     # Verify SQLite directly
     conn = get_db_connection()
-    row = conn.execute("SELECT * FROM vendor_offers WHERE vendor_id = 2 AND med_id = 4").fetchone()
+    row = conn.execute("SELECT * FROM vendor_offers WHERE vendor_id = 2 AND med_id = ?", (new_med_id,)).fetchone()
     conn.close()
     assert row is not None
     assert row["base_price"] == 5.50
@@ -258,12 +259,12 @@ def test_create_vendor_offer_invalid_parameters_rejection():
 # ==============================================================================
 def test_agent_discovers_and_processes_newly_added_medicine():
     """
-    Verify Store Procurement Agent automatically discovers newly created medicine (Amoxicillin),
+    Verify Store Procurement Agent automatically discovers newly created medicine (Doxycycline),
     evaluates replenishment demand, scores candidate vendor offers, negotiates, validates, and executes.
     """
-    # 1. Create Medicine: Amoxicillin (stock: 10, reorder: 30, sales: 5, lead: 3 -> coverage: 5d, need: 15u)
+    # 1. Create Medicine: Doxycycline (stock: 10, reorder: 30, sales: 5, lead: 3 -> coverage: 5d, need: 15u)
     res_med = client.post("/inventory", json={
-        "name": "Amoxicillin",
+        "name": "Doxycycline Syrup",
         "current_stock": 10,
         "reorder_point": 30,
         "daily_sales": 5,
@@ -273,7 +274,7 @@ def test_agent_discovers_and_processes_newly_added_medicine():
     assert res_med.status_code == 201
     new_med_id = res_med.json()["medicine"]["med_id"]
 
-    # 2. Add Vendor Offers for Amoxicillin from Vendor A and Vendor B
+    # 2. Add Vendor Offers for Doxycycline Syrup from Vendor A and Vendor B
     client.post("/vendor-offers", json={
         "vendor_id": 1,
         "med_id": new_med_id,
@@ -291,8 +292,8 @@ def test_agent_discovers_and_processes_newly_added_medicine():
 
     # 3. Run StoreAgent
     agent = StoreAgent()
-    amox_item = next(i for i in get_inventory() if i["med_id"] == new_med_id)
-    state = agent.evaluate_medicine(amox_item)
+    doxy_item = next(i for i in get_inventory() if i["med_id"] == new_med_id)
+    state = agent.evaluate_medicine(doxy_item)
 
     # Need check (coverage = 3+2 = 5, raw_need = 5*5 = 25, stock = 10 -> required_qty = 15)
     assert state.required_qty == 15
@@ -312,7 +313,6 @@ def test_agent_discovers_and_processes_newly_added_medicine():
     assert state.best_offer["unit_price"] == 6.01
     assert state.best_offer["quantity"] == 20
     assert state.best_offer["total_cost"] == 120.20
-
 
     # Validation: PASS all 7 checks
     assert state.validation_result["valid"] is True

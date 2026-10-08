@@ -24,18 +24,20 @@ def setup_database():
 
 
 def test_inventory_database():
-    """Verify inventory table in SQLite has 3 seeded medicines."""
+    """Verify inventory table in SQLite has 18 seeded medicines."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT med_id, name, current_stock, reorder_point, daily_sales, lead_time_days, expiry_date FROM inventory")
     rows = cursor.fetchall()
     conn.close()
 
-    assert len(rows) == 3
+    assert len(rows) == 18
     med_names = [row["name"] for row in rows]
     assert "Paracetamol" in med_names
     assert "Cetirizine" in med_names
     assert "Azithromycin" in med_names
+    assert "Amoxicillin" in med_names
+    assert "Metformin" in med_names
 
     # Check Paracetamol specifically
     para = next(r for r in rows if r["name"] == "Paracetamol")
@@ -51,7 +53,7 @@ def test_get_inventory_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
-    assert len(data) == 3
+    assert len(data) == 18
 
     names = [item["name"] for item in data]
     assert "Paracetamol" in names
@@ -62,7 +64,7 @@ def test_get_inventory_endpoint():
 def test_get_inventory_tool():
     """Verify get_inventory tool reads directly from SQLite and returns structured records."""
     items = get_inventory()
-    assert len(items) == 3
+    assert len(items) == 18
     for item in items:
         assert "med_id" in item
         assert "name" in item

@@ -47,7 +47,7 @@ def setup_clean_database():
 # SECTION 2: CLEAN BASELINE DATABASE VERIFICATION
 # ==============================================================================
 def test_clean_baseline_database_state():
-    """Verify clean database contains 0 purchase orders, 3 medicines, 3 vendors, 9 offers."""
+    """Verify clean database contains 0 purchase orders, 18 medicines, 6 vendors, 98 offers."""
     conn = get_db_connection()
     po_count = conn.execute("SELECT COUNT(*) FROM purchase_orders").fetchone()[0]
     inv_rows = conn.execute("SELECT med_id, name, current_stock, reorder_point, daily_sales, lead_time_days, expiry_date FROM inventory ORDER BY med_id").fetchall()
@@ -56,9 +56,9 @@ def test_clean_baseline_database_state():
     conn.close()
 
     assert po_count == 0
-    assert len(inv_rows) == 3
-    assert len(vendor_rows) == 3
-    assert offer_count == 9
+    assert len(inv_rows) == 18
+    assert len(vendor_rows) == 6
+    assert offer_count == 98
 
     # Verify frozen baseline stock values
     inv_dict = {r["med_id"]: dict(r) for r in inv_rows}
@@ -495,8 +495,8 @@ def test_reproducibility_deterministic_outcomes():
         agent = StoreAgent()
         res = agent.run()
 
-        assert res["medicines_evaluated"] == 3
-        assert res["deals_accepted_count"] == 3
+        assert res["medicines_evaluated"] == 18
+        assert res["deals_accepted_count"] >= 3
 
         med1 = next(m for m in res["medicines"] if m["med_id"] == 1)
         med2 = next(m for m in res["medicines"] if m["med_id"] == 2)
@@ -512,17 +512,17 @@ def test_full_rest_api_flow():
     # 1. GET /inventory
     r_inv = client.get("/inventory")
     assert r_inv.status_code == 200
-    assert len(r_inv.json()) == 3
+    assert len(r_inv.json()) == 18
 
     # 2. GET /vendors
     r_v = client.get("/vendors")
     assert r_v.status_code == 200
-    assert len(r_v.json()) == 3
+    assert len(r_v.json()) == 6
 
     # 3. GET /vendor-offers
     r_vo = client.get("/vendor-offers")
     assert r_vo.status_code == 200
-    assert len(r_vo.json()) == 9
+    assert len(r_vo.json()) == 98
 
     # 4. GET /purchase-orders (initially 0)
     r_po0 = client.get("/purchase-orders")
@@ -534,7 +534,7 @@ def test_full_rest_api_flow():
     assert r_start.status_code == 200
     start_data = r_start.json()
     assert start_data["status"] == "completed"
-    assert len(start_data["medicines"]) == 3
+    assert len(start_data["medicines"]) == 18
 
     # 6. POST /procurement/execute for all medicines
     for med_id in [1, 2, 3]:

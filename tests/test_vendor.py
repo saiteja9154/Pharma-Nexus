@@ -25,29 +25,32 @@ def setup_database():
 
 
 def test_vendors_database():
-    """Verify vendors table in SQLite has 3 seeded vendors."""
+    """Verify vendors table in SQLite has 6 seeded vendors."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT vendor_id, name FROM vendors")
     rows = cursor.fetchall()
     conn.close()
 
-    assert len(rows) == 3
+    assert len(rows) == 6
     vendor_names = [row["name"] for row in rows]
     assert "Vendor A" in vendor_names
     assert "Vendor B" in vendor_names
     assert "Vendor C" in vendor_names
+    assert "Vendor D" in vendor_names
+    assert "Vendor E" in vendor_names
+    assert "Vendor F" in vendor_names
 
 
 def test_vendor_offers_database():
-    """Verify vendor_offers table in SQLite has 9 seeded offers."""
+    """Verify vendor_offers table in SQLite has 98 seeded offers."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT vendor_id, med_id, base_price, min_qty, delivery_days FROM vendor_offers")
     rows = cursor.fetchall()
     conn.close()
 
-    assert len(rows) == 9
+    assert len(rows) == 98
 
     # Vendor A Paracetamol (med_id 1): lowest price 8.00, high MOQ 500, delivery 5 days
     v_a_p1 = next(r for r in rows if r["vendor_id"] == 1 and r["med_id"] == 1)
@@ -95,11 +98,14 @@ def test_get_vendors_endpoint():
     response = client.get("/vendors")
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 3
+    assert len(data) == 6
     names = [v["name"] for v in data]
     assert "Vendor A" in names
     assert "Vendor B" in names
     assert "Vendor C" in names
+    assert "Vendor D" in names
+    assert "Vendor E" in names
+    assert "Vendor F" in names
 
 
 def test_get_vendor_offers_endpoint():
@@ -107,7 +113,7 @@ def test_get_vendor_offers_endpoint():
     response = client.get("/vendor-offers")
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 9
+    assert len(data) == 98
     assert "vendor_name" in data[0]
     assert "med_name" in data[0]
     assert "base_price" in data[0]
@@ -115,7 +121,7 @@ def test_get_vendor_offers_endpoint():
 
 def test_vendor_offers_moq_consistency():
     """
-    Verify MOQ and Quantity consistency for all 9 vendor offers:
+    Verify MOQ and Quantity consistency for all 98 vendor offers:
     - vendor_offered_qty = max(required_qty, vendor_MOQ)
     - vendor_offered_qty >= vendor_MOQ
     - vendor_offered_qty >= required_qty
@@ -126,7 +132,7 @@ def test_vendor_offers_moq_consistency():
     offers = conn.execute("SELECT vendor_id, med_id, base_price, min_qty, delivery_days FROM vendor_offers").fetchall()
     conn.close()
 
-    assert len(offers) == 9
+    assert len(offers) == 98
 
     for offer in offers:
         med = inventory_items[offer["med_id"]]
@@ -156,11 +162,11 @@ def test_vendor_offers_moq_consistency():
 
 def test_get_vendor_quotes_tool():
     """
-    Test get_vendor_quotes tool returns all 3 candidate vendors for a medicine,
+    Test get_vendor_quotes tool returns all 6 candidate vendors for Paracetamol,
     correctly filters by med_id, applies the MOQ quantity rule, and computes total cost.
     """
     quotes = get_vendor_quotes(med_id=1, required_qty=100)
-    assert len(quotes) == 3
+    assert len(quotes) == 6
 
     v_a = next(q for q in quotes if q["vendor_name"] == "Vendor A")
     assert v_a["base_price"] == 8.00
@@ -216,7 +222,7 @@ def test_score_quotes_multi_factor():
     quotes = get_vendor_quotes(med_id=1, required_qty=100)
     scored = score_quotes(quotes, expiry_safe_qty=1920)
 
-    assert len(scored) == 3
+    assert len(scored) == 6
     for sq in scored:
         assert sq["feasible"] is True
         assert 0.0 <= sq["score"] <= 100.0
