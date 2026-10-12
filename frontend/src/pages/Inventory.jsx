@@ -1,5 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Package, RefreshCw, AlertTriangle, CheckCircle, Clock, Edit3, X, Save, Plus } from 'lucide-react';
+import {
+  Package,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Edit3,
+  X,
+  Save,
+  Plus,
+  Search,
+  Layers,
+  Calendar,
+  Filter,
+  ShieldAlert,
+  ArrowUpDown,
+  Boxes,
+} from 'lucide-react';
 
 const API_BASE = 'http://127.0.0.1:8000';
 
@@ -8,6 +25,16 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+
+  // Filters & Search
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'REORDER' | 'ADEQUATE' | 'EXPIRING'
+
+  // Batches Modal State
+  const [viewingBatchesMed, setViewingBatchesMed] = useState(null);
+  const [batches, setBatches] = useState([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [batchesError, setBatchesError] = useState(null);
 
   // Edit Modal State
   const [editingMed, setEditingMed] = useState(null);
@@ -54,6 +81,31 @@ export default function Inventory() {
   useEffect(() => {
     fetchInventory();
   }, []);
+
+  // View Batches Handler
+  const openBatchesModal = async (med) => {
+    setViewingBatchesMed(med);
+    setLoadingBatches(true);
+    setBatchesError(null);
+    try {
+      const res = await fetch(`${API_BASE}/inventory/${med.med_id}/batches`);
+      if (!res.ok) {
+        throw new Error(`Failed to load batches: ${res.statusText}`);
+      }
+      const data = await res.json();
+      setBatches(data);
+    } catch (err) {
+      setBatchesError(err.message || 'Failed to fetch batch records');
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+
+  const closeBatchesModal = () => {
+    setViewingBatchesMed(null);
+    setBatches([]);
+    setBatchesError(null);
+  };
 
   // Edit Modal Handlers
   const openEditModal = (item) => {
@@ -240,16 +292,52 @@ export default function Inventory() {
     }
   };
 
+  // Helper date calculations
+  const nowMs = Date.now();
+  const getDaysUntilExpiry = (expiryStr) => {
+    if (!expiryStr) return 999;
+    const diff = new Date(expiryStr).getTime() - nowMs;
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  };
+
+  // KPI Calculations
+  const totalMeds = inventory.length;
+  const reorderCount = inventory.filter((item) => item.current_stock <= item.reorder_point).length;
+  const expiringSoonCount = inventory.filter((item) => getDaysUntilExpiry(item.expiry_date) <= 90).length;
+  const totalStockUnits = inventory.reduce((sum, item) => sum + (item.current_stock || 0), 0);
+
+  // Filtered List
+  const filteredInventory = inventory.filter((item) => {
+    // Search match
+    const q = searchTerm.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      item.name.toLowerCase().includes(q) ||
+      String(item.med_id).includes(q);
+
+    if (!matchesSearch) return false;
+
+    // Status Filter
+    const isLow = item.current_stock <= item.reorder_point;
+    const daysLeft = getDaysUntilExpiry(item.expiry_date);
+    const isExpiring = daysLeft <= 90;
+
+    if (statusFilter === 'REORDER') return isLow;
+    if (statusFilter === 'ADEQUATE') return !isLow;
+    if (statusFilter === 'EXPIRING') return isExpiring;
+    return true; // 'ALL'
+  });
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">
             <Package size={28} color="#38bdf8" />
-            Inventory Management
+            Inventory & Lot Management
           </h1>
           <p className="page-subtitle">
-            Live stock levels, reorder thresholds, and lead times queried from SQLite ERP
+            Real-time stock on hand, reorder thresholds, batch lots, and expiry shelf-life monitoring
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -292,6 +380,145 @@ export default function Inventory() {
         </div>
       )}
 
+      {/* KPI Cards Grid */}
+      <div className="stats-grid" style={{ marginBottom: '1.5rem' }}>
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
+            <Package size={24} />
+          </div>
+          <div>
+            <div className="stat-label">Catalog Medicines</div>
+            <div className="stat-value" style={{ color: '#38bdf8' }}>
+              {totalMeds} Active
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: 'rgba(251, 113, 133, 0.15)', color: '#fb7185' }}>
+            <AlertTriangle size={24} />
+          </div>
+          <div>
+            <div className="stat-label">Stockout Warnings</div>
+            <div className="stat-value" style={{ color: reorderCount > 0 ? '#fb7185' : '#34d399' }}>
+              {reorderCount} Need Reorder
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
+            <Calendar size={24} />
+          </div>
+          <div>
+            <div className="stat-label">Expiring &le; 90 Days</div>
+            <div className="stat-value" style={{ color: expiringSoonCount > 0 ? '#fbbf24' : '#34d399' }}>
+              {expiringSoonCount} Batches
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34d399' }}>
+            <Boxes size={24} />
+          </div>
+          <div>
+            <div className="stat-label">Total Stock Units</div>
+            <div className="stat-value" style={{ color: '#34d399' }}>
+              {totalStockUnits.toLocaleString()} Units
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Search and Filters Toolbar */}
+      <div
+        className="card"
+        style={{
+          padding: '0.85rem 1.25rem',
+          marginBottom: '1.25rem',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px', maxWidth: '420px' }}>
+          <div style={{ position: 'relative', width: '100%' }}>
+            <Search
+              size={16}
+              color="var(--text-muted)"
+              style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }}
+            />
+            <input
+              id="inventory-search-input"
+              type="text"
+              placeholder="Search by medicine name or ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="form-input"
+              style={{ paddingLeft: '32px', height: '36px', fontSize: '0.85rem' }}
+            />
+          </div>
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="btn btn-secondary btn-sm"
+              title="Clear search"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Filter Pills */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setStatusFilter('ALL')}
+            className={`btn btn-sm ${statusFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+          >
+            All ({inventory.length})
+          </button>
+          <button
+            onClick={() => setStatusFilter('REORDER')}
+            className={`btn btn-sm ${statusFilter === 'REORDER' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.35rem 0.75rem',
+              color: statusFilter === 'REORDER' ? '#fff' : '#fb7185',
+              borderColor: statusFilter === 'REORDER' ? 'transparent' : 'rgba(251, 113, 133, 0.4)',
+            }}
+          >
+            Reorder Needed ({reorderCount})
+          </button>
+          <button
+            onClick={() => setStatusFilter('ADEQUATE')}
+            className={`btn btn-sm ${statusFilter === 'ADEQUATE' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.35rem 0.75rem',
+              color: statusFilter === 'ADEQUATE' ? '#fff' : '#34d399',
+            }}
+          >
+            Adequate Stock ({inventory.length - reorderCount})
+          </button>
+          <button
+            onClick={() => setStatusFilter('EXPIRING')}
+            className={`btn btn-sm ${statusFilter === 'EXPIRING' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.35rem 0.75rem',
+              color: statusFilter === 'EXPIRING' ? '#fff' : '#fbbf24',
+              borderColor: statusFilter === 'EXPIRING' ? 'transparent' : 'rgba(245, 158, 11, 0.4)',
+            }}
+          >
+            Expiring &le; 90d ({expiringSoonCount})
+          </button>
+        </div>
+      </div>
+
       {loading ? (
         <div className="card">
           <div className="loading-box">
@@ -302,33 +529,38 @@ export default function Inventory() {
       ) : (
         <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Stock Status ({inventory.length} medicines)</h2>
-            <span className="badge badge-blue">ERP Live Data</span>
+            <h2 className="card-title">
+              Stock Status ({filteredInventory.length} of {inventory.length} medicines)
+            </h2>
+            <span className="badge badge-blue">ERP Live Master Data</span>
           </div>
           <div className="table-container">
             <table className="data-table" id="inventory-table">
               <thead>
                 <tr>
                   <th>Medicine</th>
-                  <th>Stock</th>
+                  <th>Stock on Hand</th>
                   <th>Reorder Point</th>
-                  <th>Daily Sales</th>
+                  <th>Daily Demand</th>
                   <th>Lead Time</th>
-                  <th>Expiry</th>
+                  <th>Batch Expiry</th>
                   <th>Status</th>
-                  <th style={{ textAlign: 'center' }}>Action</th>
+                  <th style={{ textAlign: 'center' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {inventory.length === 0 ? (
+                {filteredInventory.length === 0 ? (
                   <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                      No inventory records found in database.
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                      No medicine records matched your search / filter criteria.
                     </td>
                   </tr>
                 ) : (
-                  inventory.map((item) => {
+                  filteredInventory.map((item) => {
                     const isLowStock = item.current_stock <= item.reorder_point;
+                    const daysLeft = getDaysUntilExpiry(item.expiry_date);
+                    const isExpiringSoon = daysLeft <= 90;
+
                     return (
                       <tr key={item.med_id} id={`med-row-${item.med_id}`}>
                         <td>
@@ -357,8 +589,21 @@ export default function Inventory() {
                             {item.lead_time_days} days
                           </span>
                         </td>
-                        <td className="font-mono" style={{ color: 'var(--text-muted)' }}>
-                          {item.expiry_date}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span className="font-mono" style={{ color: isExpiringSoon ? '#fbbf24' : 'var(--text-muted)' }}>
+                              {item.expiry_date}
+                            </span>
+                            {isExpiringSoon && (
+                              <span
+                                className="badge badge-amber"
+                                style={{ fontSize: '0.68rem', padding: '1px 5px' }}
+                                title={`${daysLeft} days remaining`}
+                              >
+                                {daysLeft}d left
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td>
                           {isLowStock ? (
@@ -374,15 +619,28 @@ export default function Inventory() {
                           )}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <button
-                            id={`btn-edit-med-${item.med_id}`}
-                            onClick={() => openEditModal(item)}
-                            className="btn btn-sm btn-edit"
-                            title={`Edit ${item.name} master data`}
-                          >
-                            <Edit3 size={13} />
-                            <span>Edit</span>
-                          </button>
+                          <div style={{ display: 'inline-flex', gap: '0.4rem', justifyContent: 'center' }}>
+                            <button
+                              id={`btn-batches-med-${item.med_id}`}
+                              onClick={() => openBatchesModal(item)}
+                              className="btn btn-sm btn-secondary"
+                              title={`View lot batches for ${item.name}`}
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                            >
+                              <Layers size={13} color="#38bdf8" />
+                              <span>Batches</span>
+                            </button>
+                            <button
+                              id={`btn-edit-med-${item.med_id}`}
+                              onClick={() => openEditModal(item)}
+                              className="btn btn-sm btn-edit"
+                              title={`Edit ${item.name} master data`}
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                            >
+                              <Edit3 size={13} />
+                              <span>Edit</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -390,6 +648,128 @@ export default function Inventory() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Lot Batches Modal */}
+      {viewingBatchesMed && (
+        <div className="modal-backdrop" onClick={closeBatchesModal}>
+          <div
+            className="modal-dialog"
+            style={{ maxWidth: '650px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div className="modal-title">
+                <Layers size={18} color="#38bdf8" />
+                <span>
+                  Lot Batches: {viewingBatchesMed.name} (ID #{viewingBatchesMed.med_id})
+                </span>
+              </div>
+              <button className="modal-close-btn" onClick={closeBatchesModal}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {loadingBatches ? (
+                <div className="loading-box" style={{ padding: '2rem' }}>
+                  <div className="spinner" />
+                  <p>Loading batch lots from SQLite database...</p>
+                </div>
+              ) : batchesError ? (
+                <div className="error-box">
+                  <AlertTriangle size={16} />
+                  <span>{batchesError}</span>
+                </div>
+              ) : batches.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                  <Package size={32} color="var(--text-dim)" style={{ margin: '0 auto 0.75rem' }} />
+                  <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.25rem' }}>
+                    No Segregated Lot Batches Recorded
+                  </div>
+                  <p style={{ fontSize: '0.85rem' }}>
+                    Stock of {viewingBatchesMed.current_stock} units is currently tracked at the primary medicine level.
+                    Receiving physical goods via Purchase Orders automatically records verified lot batches.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Total Batch Records: <strong style={{ color: '#38bdf8' }}>{batches.length}</strong>
+                    </div>
+                    <span className="badge badge-blue">FIFO Lot Tracking</span>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="data-table" style={{ fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr>
+                          <th>Batch #</th>
+                          <th>Lot Qty</th>
+                          <th>Expiry Date</th>
+                          <th>Received Date</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batches.map((b) => {
+                          const days = getDaysUntilExpiry(b.expiry_date);
+                          const isExpired = days <= 0;
+                          const isSoon = days > 0 && days <= 90;
+
+                          return (
+                            <tr key={b.batch_id || b.batch_number}>
+                              <td className="font-mono" style={{ fontWeight: 700, color: '#38bdf8' }}>
+                                {b.batch_number}
+                              </td>
+                              <td className="font-mono" style={{ fontWeight: 700 }}>
+                                {b.quantity}
+                              </td>
+                              <td className="font-mono">
+                                <span style={{ color: isExpired ? '#fb7185' : isSoon ? '#fbbf24' : 'var(--text-main)' }}>
+                                  {b.expiry_date}
+                                </span>
+                              </td>
+                              <td className="font-mono" style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                                {b.received_at ? b.received_at.split('T')[0] : 'N/A'}
+                              </td>
+                              <td>
+                                {isExpired ? (
+                                  <span className="badge badge-rose" style={{ fontSize: '0.72rem' }}>
+                                    Expired
+                                  </span>
+                                ) : isSoon ? (
+                                  <span className="badge badge-amber" style={{ fontSize: '0.72rem' }}>
+                                    {days}d Left
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-green" style={{ fontSize: '0.72rem' }}>
+                                    Good ({days}d)
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={closeBatchesModal}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

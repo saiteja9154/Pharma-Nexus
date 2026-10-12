@@ -22,6 +22,8 @@ import {
   ShieldCheck,
   Check,
   RefreshCw,
+  Info,
+  Calculator,
 } from 'lucide-react';
 
 const API_BASE = 'http://127.0.0.1:8000';
@@ -279,6 +281,29 @@ export default function AgentControl() {
         </div>
       )}
 
+      {/* Gateway Architecture Notice */}
+      {agentResult && (
+        <div
+          style={{
+            background: 'rgba(56, 189, 248, 0.06)',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.75rem 1.25rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            fontSize: '0.85rem',
+            color: 'var(--text-muted)',
+          }}
+        >
+          <Info size={18} color="#38bdf8" style={{ flexShrink: 0 }} />
+          <div>
+            <strong style={{ color: '#38bdf8' }}>Deterministic Supplier Simulation Notice:</strong> Vendor quote responses and negotiation rounds are simulated deterministically via <code>SimulatedSupplierGateway</code> (Demo Mode). External integration interface (<code>SupplierGatewayInterface</code>) is established for plugging into live supplier APIs and electronic EDI quotation networks in production.
+          </div>
+        </div>
+      )}
+
       {/* Autonomous Vendor Selection Cards */}
       {agentResult && agentResult.medicines && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '1.5rem' }}>
@@ -318,6 +343,39 @@ export default function AgentControl() {
                 </div>
 
                 <div className="card-body">
+                  {/* Formula and Need Calculation Audit */}
+                  <div
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.75rem 1rem',
+                      marginBottom: '1rem',
+                      fontSize: '0.82rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', color: '#38bdf8', fontWeight: 700 }}>
+                      <Calculator size={14} />
+                      <span>Inventory Formula & Need Audit:</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      <div>Stock: <strong style={{ color: 'var(--text-main)' }}>{med.current_stock}</strong></div>
+                      <div>Reorder Pt: <strong style={{ color: 'var(--text-main)' }}>{med.reorder_point}</strong></div>
+                      <div>Daily Sales: <strong style={{ color: 'var(--text-main)' }}>{med.daily_sales}/d</strong></div>
+                      <div>Lead Time: <strong style={{ color: 'var(--text-main)' }}>{med.lead_time_days}d</strong></div>
+                      {med.need_calculation?.outstanding_po_qty !== undefined && (
+                        <div>Active On-Order POs: <strong style={{ color: '#38bdf8' }}>{med.need_calculation.outstanding_po_qty}</strong></div>
+                      )}
+                      <div>Target Stock: <strong style={{ color: '#34d399' }}>{med.need_calculation?.target_stock || (med.daily_sales * med.lead_time_days + med.daily_sales * 7)}</strong></div>
+                      <div>Net Need: <strong style={{ color: med.required_qty > 0 ? '#fb7185' : '#34d399' }}>{med.required_qty} units</strong></div>
+                    </div>
+                    {med.need_calculation?.explanation && (
+                      <div style={{ marginTop: '0.35rem', color: 'var(--text-dim)', fontSize: '0.78rem' }}>
+                        {med.need_calculation.explanation}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Winner Spotlight Banner with Negotiated Terms */}
                   {med.selected_vendor ? (
                     <div

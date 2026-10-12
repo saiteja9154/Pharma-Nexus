@@ -34,6 +34,7 @@ def get_vendor_quotes(
         SELECT 
             vo.vendor_id,
             v.name AS vendor_name,
+            v.reliability AS reliability,
             vo.med_id,
             i.name AS med_name,
             vo.base_price,
@@ -57,11 +58,13 @@ def get_vendor_quotes(
         # Quantity Rule: offered_qty = max(required_qty, MOQ)
         offered_qty = max(required_qty, moq)
         total_cost = round(base_price * offered_qty, 2)
+        rel = float(row["reliability"]) if ("reliability" in row.keys() and row["reliability"] is not None) else 0.95
 
         quotes.append(
             {
                 "vendor_id": row["vendor_id"],
                 "vendor_name": row["vendor_name"],
+                "reliability": rel,
                 "med_id": row["med_id"],
                 "med_name": row["med_name"],
                 "base_price": base_price,
@@ -164,8 +167,41 @@ def update_vendor_offer(
     }
 
 
+def get_vendor_offer(
+    vendor_id: int,
+    med_id: int,
+    db_path: Optional[Path | str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Retrieve a single vendor offer record."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT 
+            vo.vendor_id,
+            v.name AS vendor_name,
+            vo.med_id,
+            i.name AS med_name,
+            vo.base_price,
+            vo.min_qty,
+            vo.delivery_days
+        FROM vendor_offers vo
+        JOIN vendors v ON vo.vendor_id = v.vendor_id
+        JOIN inventory i ON vo.med_id = i.med_id
+        WHERE vo.vendor_id = ? AND vo.med_id = ?
+        """,
+        (vendor_id, med_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def add_vendor(
     name: str,
+    reliability: float = 0.95,
+    contact_email: Optional[str] = None,
+    payment_terms: str = "Net 30",
     db_path: Optional[Path | str] = None,
 ) -> Dict[str, Any]:
     """
@@ -174,10 +210,13 @@ def add_vendor(
     Validations:
       - name must not be empty
       - name must be unique (case-insensitive)
+      - reliability must be between 0.0 and 1.0
     """
     clean_name = str(name).strip()
     if not clean_name:
         raise ValueError("Vendor name cannot be empty.")
+    if not (0.0 <= reliability <= 1.0):
+        raise ValueError(f"Reliability must be between 0.0 and 1.0 (got {reliability}).")
 
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
@@ -189,7 +228,10 @@ def add_vendor(
         conn.close()
         raise ValueError(f"Vendor with name '{clean_name}' already exists (ID: #{existing['vendor_id']}).")
 
-    cursor.execute("INSERT INTO vendors (name) VALUES (?)", (clean_name,))
+    cursor.execute(
+        "INSERT INTO vendors (name, reliability, contact_email, payment_terms) VALUES (?, ?, ?, ?)",
+        (clean_name, float(reliability), contact_email, payment_terms),
+    )
     new_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -197,7 +239,84 @@ def add_vendor(
     return {
         "vendor_id": new_id,
         "name": clean_name,
+        "reliability": float(reliability),
+        "contact_email": contact_email,
+        "payment_terms": payment_terms,
     }
+
+
+def update_vendor(
+    vendor_id: int,
+    name: str,
+    reliability: float = 0.95,
+    contact_email: Optional[str] = None,
+    payment_terms: str = "Net 30",
+    db_path: Optional[Path | str] = None,
+) -> Dict[str, Any]:
+    """
+    Update master vendor information in SQLite vendors table.
+    """
+    clean_name = str(name).strip()
+    if not clean_name:
+        raise ValueError("Vendor name cannot be empty.")
+    if not (0.0 <= reliability <= 1.0):
+        raise ValueError(f"Reliability must be between 0.0 and 1.0 (got {reliability}).")
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT vendor_id FROM vendors WHERE vendor_id = ?", (vendor_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise ValueError(f"Vendor with vendor_id={vendor_id} does not exist.")
+
+    # Unique check across OTHER vendors
+    cursor.execute("SELECT vendor_id FROM vendors WHERE LOWER(name) = LOWER(?) AND vendor_id != ?", (clean_name, vendor_id))
+    if cursor.fetchone():
+        conn.close()
+        raise ValueError(f"Another vendor with name '{clean_name}' already exists.")
+
+    cursor.execute(
+        """
+        UPDATE vendors
+        SET name = ?,
+            reliability = ?,
+            contact_email = ?,
+            payment_terms = ?
+        WHERE vendor_id = ?
+        """,
+        (clean_name, float(reliability), contact_email, payment_terms, vendor_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        "vendor_id": vendor_id,
+        "name": clean_name,
+        "reliability": float(reliability),
+        "contact_email": contact_email,
+        "payment_terms": payment_terms,
+    }
+
+
+def get_vendor_by_id(
+    vendor_id: int,
+    db_path: Optional[Path | str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Retrieve a single vendor by ID from SQLite vendors table."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT vendor_id, name, reliability, contact_email, payment_terms
+        FROM vendors
+        WHERE vendor_id = ?
+        """,
+        (vendor_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def add_vendor_offer(

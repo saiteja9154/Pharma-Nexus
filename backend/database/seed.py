@@ -41,12 +41,12 @@ MEDICINES = [
 ]
 
 VENDORS = [
-    (1, "Vendor A"),  # Bulk Pharmaceutical Supplier (Lowest base price, large MOQ, slower delivery)
-    (2, "Vendor B"),  # Fast Delivery Supplier (Medium-competitive price, flexible MOQ, fastest delivery)
-    (3, "Vendor C"),  # Regional Distributor (Medium/higher price, moderate MOQ, moderate delivery)
-    (4, "Vendor D"),  # Generic Medicine Supplier (Competitive generic pricing, medium MOQ, 3-4 day delivery)
-    (5, "Vendor E"),  # Hospital Supply Distributor (Higher quality/price, flexible MOQ, reliable delivery)
-    (6, "Vendor F"),  # Specialty Pharmaceutical Supplier (Premium pricing, small MOQ, rapid delivery)
+    (1, "Vendor A", 0.95, "orders@vendora-pharma.com", "Net 30"),  # Bulk Pharmaceutical Supplier (Lowest base price, large MOQ, slower delivery)
+    (2, "Vendor B", 0.98, "supply@vendorb-express.com", "Net 15"),  # Fast Delivery Supplier (Medium-competitive price, flexible MOQ, fastest delivery)
+    (3, "Vendor C", 0.90, "sales@vendorc-distrib.com", "Net 30"),   # Regional Distributor (Medium/higher price, moderate MOQ, moderate delivery)
+    (4, "Vendor D", 0.92, "contracts@vendord-generics.com", "Net 45"),  # Generic Medicine Supplier (Competitive generic pricing, medium MOQ, 3-4 day delivery)
+    (5, "Vendor E", 0.96, "orders@vendore-hospitals.com", "Net 30"),   # Hospital Supply Distributor (Higher quality/price, flexible MOQ, reliable delivery)
+    (6, "Vendor F", 0.94, "priority@vendorf-specialty.com", "Net 15"),  # Specialty Pharmaceutical Supplier (Premium pricing, small MOQ, rapid delivery)
 ]
 
 VENDOR_OFFERS = [
@@ -229,6 +229,9 @@ def seed_db(db_path: Optional[Path | str] = None) -> None:
     cursor = conn.cursor()
 
     # Clear existing tables to ensure clean baseline on re-seeding
+    cursor.execute("DELETE FROM audit_log;")
+    cursor.execute("DELETE FROM goods_receipts;")
+    cursor.execute("DELETE FROM inventory_batches;")
     cursor.execute("DELETE FROM purchase_orders;")
     cursor.execute("DELETE FROM vendor_offers;")
     cursor.execute("DELETE FROM inventory;")
@@ -243,11 +246,11 @@ def seed_db(db_path: Optional[Path | str] = None) -> None:
         MEDICINES,
     )
 
-    # Insert vendors
+    # Insert vendors with reliability, contact email, and payment terms
     cursor.executemany(
         """
-        INSERT OR REPLACE INTO vendors (vendor_id, name)
-        VALUES (?, ?)
+        INSERT OR REPLACE INTO vendors (vendor_id, name, reliability, contact_email, payment_terms)
+        VALUES (?, ?, ?, ?, ?)
         """,
         VENDORS,
     )
@@ -259,6 +262,19 @@ def seed_db(db_path: Optional[Path | str] = None) -> None:
         VALUES (?, ?, ?, ?, ?)
         """,
         VENDOR_OFFERS,
+    )
+
+    # Seed initial inventory batches corresponding to current stock
+    initial_batches = [
+        (med[0], f"LOT-2026-{med[0]:03d}", med[2], med[6], "2026-01-10")
+        for med in MEDICINES
+    ]
+    cursor.executemany(
+        """
+        INSERT INTO inventory_batches (med_id, batch_number, quantity, expiry_date, received_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        initial_batches,
     )
 
     conn.commit()

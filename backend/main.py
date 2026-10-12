@@ -8,14 +8,56 @@ try:
     from database.db import get_db_connection, init_db
     from database.seed import seed_db
     from agent.store_agent import StoreAgent
-    from tools.inventory_tools import get_inventory as fetch_inventory, update_inventory_item, add_inventory_item
-    from tools.vendor_tools import update_vendor_offer, add_vendor, add_vendor_offer
+    from tools.inventory_tools import (
+        get_inventory as fetch_inventory,
+        update_inventory_item,
+        add_inventory_item,
+        get_inventory_item,
+        get_inventory_batches,
+    )
+    from tools.vendor_tools import (
+        update_vendor_offer,
+        add_vendor,
+        update_vendor,
+        add_vendor_offer,
+    )
+    from tools.purchase_order_tools import (
+        create_purchase_order_transaction,
+        get_all_purchase_orders,
+        approve_purchase_order,
+        transmit_order_to_supplier,
+        cancel_purchase_order,
+        receive_goods_transaction,
+        get_goods_receipts,
+        get_audit_logs,
+    )
 except ImportError:
     from backend.database.db import get_db_connection, init_db
     from backend.database.seed import seed_db
     from backend.agent.store_agent import StoreAgent
-    from backend.tools.inventory_tools import get_inventory as fetch_inventory, update_inventory_item, add_inventory_item
-    from backend.tools.vendor_tools import update_vendor_offer, add_vendor, add_vendor_offer
+    from backend.tools.inventory_tools import (
+        get_inventory as fetch_inventory,
+        update_inventory_item,
+        add_inventory_item,
+        get_inventory_item,
+        get_inventory_batches,
+    )
+    from backend.tools.vendor_tools import (
+        update_vendor_offer,
+        add_vendor,
+        update_vendor,
+        add_vendor_offer,
+    )
+    from backend.tools.purchase_order_tools import (
+        create_purchase_order_transaction,
+        get_all_purchase_orders,
+        approve_purchase_order,
+        transmit_order_to_supplier,
+        cancel_purchase_order,
+        receive_goods_transaction,
+        get_goods_receipts,
+        get_audit_logs,
+    )
 
 
 
@@ -145,6 +187,16 @@ class InventoryCreateRequest(BaseModel):
 
 class VendorCreateRequest(BaseModel):
     name: str
+    reliability: Optional[float] = 0.95
+    contact_email: Optional[str] = None
+    payment_terms: Optional[str] = "Net 30"
+
+
+class VendorUpdateRequest(BaseModel):
+    name: str
+    reliability: Optional[float] = 0.95
+    contact_email: Optional[str] = None
+    payment_terms: Optional[str] = "Net 30"
 
 
 class VendorOfferUpdateRequest(BaseModel):
@@ -161,6 +213,33 @@ class VendorOfferCreateRequest(BaseModel):
     delivery_days: int
 
 
+class GoodsReceiptRequest(BaseModel):
+    received_quantity: int
+    batch_number: str
+    expiry_date: str
+    notes: Optional[str] = None
+
+
+class POApproveRequest(BaseModel):
+    approver: Optional[str] = "Chief Pharmacist"
+
+
+class POCancelRequest(BaseModel):
+    reason: Optional[str] = "Cancelled by user"
+
+
+class PurchaseOrderCreateRequest(BaseModel):
+    medicine_id: Optional[int] = None
+    med_id: Optional[int] = None
+    vendor_id: int
+    quantity: int
+    unit_price: float
+    total_cost: Optional[float] = None
+    delivery_days: Optional[int] = 3
+    status: Optional[str] = "PENDING_APPROVAL"
+    notes: Optional[str] = None
+
+
 
 @app.get("/health", response_model=HealthResponse)
 def health_check():
@@ -172,6 +251,21 @@ def health_check():
 def get_inventory() -> List[Dict[str, Any]]:
     """Retrieve all inventory records from SQLite database using the inventory tool."""
     return fetch_inventory()
+
+
+@app.get("/inventory/{med_id}")
+def get_inventory_item_endpoint(med_id: int):
+    """Retrieve details for a single medicine."""
+    item = get_inventory_item(med_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Medicine ID {med_id} not found.")
+    return item
+
+
+@app.get("/inventory/{med_id}/batches")
+def get_inventory_batches_endpoint(med_id: int):
+    """Retrieve recorded batches for a specific medicine."""
+    return get_inventory_batches(med_id)
 
 
 @app.post("/inventory", status_code=201)
@@ -214,11 +308,11 @@ def update_inventory_endpoint(med_id: int, payload: InventoryUpdateRequest) -> D
 
 @app.get("/vendors")
 def get_vendors() -> List[Dict[str, Any]]:
-    """Retrieve all vendors from SQLite database."""
+    """Retrieve all vendors from SQLite database with reliability and contact terms."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT vendor_id, name
+        SELECT vendor_id, name, COALESCE(reliability, 0.95) AS reliability, contact_email, COALESCE(payment_terms, 'Net 30') AS payment_terms
         FROM vendors
         ORDER BY vendor_id ASC
     """)
@@ -227,12 +321,51 @@ def get_vendors() -> List[Dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+@app.get("/vendors/{vendor_id}")
+def get_vendor_endpoint(vendor_id: int):
+    """Retrieve a single vendor with details."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT vendor_id, name, reliability, contact_email, payment_terms FROM vendors WHERE vendor_id = ?",
+        (vendor_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Vendor ID {vendor_id} not found.")
+    return dict(row)
+
+
 @app.post("/vendors", status_code=201)
 def create_vendor_endpoint(payload: VendorCreateRequest) -> Dict[str, Any]:
     """Create a new vendor in master records."""
     try:
-        created = add_vendor(name=payload.name)
+        created = add_vendor(
+            name=payload.name,
+            reliability=payload.reliability if payload.reliability is not None else 0.95,
+            contact_email=payload.contact_email,
+            payment_terms=payload.payment_terms or "Net 30",
+        )
         return {"success": True, "vendor": created}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/vendors/{vendor_id}")
+def update_vendor_endpoint(vendor_id: int, payload: VendorUpdateRequest):
+    """Update master vendor information."""
+    try:
+        updated = update_vendor(
+            vendor_id=vendor_id,
+            name=payload.name,
+            reliability=payload.reliability if payload.reliability is not None else 0.95,
+            contact_email=payload.contact_email,
+            payment_terms=payload.payment_terms or "Net 30",
+        )
+        return {"success": True, "vendor": updated}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -261,6 +394,35 @@ def get_vendor_offers() -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+@app.get("/vendor-offers/{vendor_id}/{med_id}")
+def get_vendor_offer_endpoint(vendor_id: int, med_id: int):
+    """Retrieve a single contract offer."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT 
+            vo.vendor_id,
+            v.name AS vendor_name,
+            vo.med_id,
+            i.name AS med_name,
+            vo.base_price,
+            vo.min_qty,
+            vo.delivery_days
+        FROM vendor_offers vo
+        JOIN vendors v ON vo.vendor_id = v.vendor_id
+        JOIN inventory i ON vo.med_id = i.med_id
+        WHERE vo.vendor_id = ? AND vo.med_id = ?
+        """,
+        (vendor_id, med_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Vendor offer not found for vendor {vendor_id} and medicine {med_id}.")
+    return dict(row)
 
 
 @app.post("/vendor-offers", status_code=201)
@@ -299,33 +461,112 @@ def update_vendor_offer_endpoint(vendor_id: int, med_id: int, payload: VendorOff
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
 @app.get("/purchase-orders")
 def get_purchase_orders() -> List[Dict[str, Any]]:
-    """Retrieve all purchase orders from SQLite database."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT 
-            po.po_id,
-            po.med_id,
-            i.name AS medicine_name,
-            po.vendor_id,
-            v.name AS vendor_name,
-            po.quantity,
-            po.unit_price,
-            po.total_cost,
-            po.delivery_days,
-            po.status
-        FROM purchase_orders po
-        LEFT JOIN inventory i ON po.med_id = i.med_id
-        LEFT JOIN vendors v ON po.vendor_id = v.vendor_id
-        ORDER BY po.po_id DESC
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    """Retrieve all purchase orders from SQLite database with status and receipt progress."""
+    return get_all_purchase_orders()
+
+
+@app.post("/purchase-orders", status_code=201)
+def create_purchase_order_endpoint(payload: PurchaseOrderCreateRequest) -> Dict[str, Any]:
+    """Create a new purchase order with safe lifecycle status."""
+    med_id = payload.medicine_id or payload.med_id
+    if not med_id:
+        raise HTTPException(status_code=400, detail="medicine_id or med_id is required.")
+    total_cost = payload.total_cost or round(payload.unit_price * payload.quantity, 2)
+    try:
+        po = create_purchase_order_transaction(
+            med_id=med_id,
+            vendor_id=payload.vendor_id,
+            quantity=payload.quantity,
+            unit_price=payload.unit_price,
+            total_cost=total_cost,
+            delivery_days=payload.delivery_days or 3,
+            status=payload.status or "PENDING_APPROVAL",
+            notes=payload.notes,
+        )
+        return {"success": True, "purchase_order": po}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/purchase-orders/{po_id}")
+def get_single_purchase_order(po_id: int):
+    """Retrieve details and receipt history for a single purchase order."""
+    orders = get_all_purchase_orders()
+    for o in orders:
+        if o["po_id"] == po_id:
+            receipts = get_goods_receipts(po_id=po_id)
+            return {**o, "receipts": receipts}
+    raise HTTPException(status_code=404, detail=f"Purchase order PO-#{po_id:04d} not found.")
+
+
+@app.post("/purchase-orders/{po_id}/approve")
+def approve_purchase_order_endpoint(po_id: int, payload: Optional[POApproveRequest] = None):
+    """Approve a purchase order (PENDING_APPROVAL -> APPROVED)."""
+    approver = payload.approver if payload else "Chief Pharmacist"
+    try:
+        return approve_purchase_order(po_id=po_id, approver_name=approver)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/purchase-orders/{po_id}/order")
+def order_purchase_order_endpoint(po_id: int):
+    """Dispatch an approved purchase order to supplier (APPROVED -> ORDERED)."""
+    try:
+        return transmit_order_to_supplier(po_id=po_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/purchase-orders/{po_id}/cancel")
+def cancel_purchase_order_endpoint(po_id: int, payload: Optional[POCancelRequest] = None):
+    """Cancel an active purchase order."""
+    reason = payload.reason if payload else "Cancelled by user"
+    try:
+        return cancel_purchase_order(po_id=po_id, reason=reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/purchase-orders/{po_id}/receive")
+def receive_purchase_order_goods_endpoint(po_id: int, payload: GoodsReceiptRequest):
+    """
+    Record verified goods receipt, increment inventory stock, assign batch, and update PO status.
+    """
+    try:
+        return receive_goods_transaction(
+            po_id=po_id,
+            received_quantity=payload.received_quantity,
+            batch_number=payload.batch_number,
+            expiry_date=payload.expiry_date,
+            discrepancy_notes=payload.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/goods-receipts")
+def get_goods_receipts_endpoint(po_id: Optional[int] = None):
+    """Retrieve goods receipt history."""
+    return get_goods_receipts(po_id=po_id)
+
+
+@app.get("/audit-logs")
+def get_audit_logs_endpoint(entity_type: Optional[str] = None, limit: int = 100):
+    """Retrieve audit log history."""
+    return get_audit_logs(entity_type=entity_type, limit=limit)
 
 
 @app.post("/procurement/start", response_model=ProcurementStartResponse)

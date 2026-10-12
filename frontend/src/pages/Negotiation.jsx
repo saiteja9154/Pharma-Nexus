@@ -155,10 +155,13 @@ export default function Negotiation() {
             gap: '0.75rem',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             <span className="badge badge-amber font-mono" style={{ fontWeight: 800 }}>
               <CheckCircle2 size={13} />
-              LIVE NEGOTIATION RUN
+              SIMULATED NEGOTIATION (DEMO MODE)
+            </span>
+            <span className="badge badge-blue" style={{ fontSize: '0.75rem' }}>
+              SimulatedSupplierGateway
             </span>
             <span style={{ color: 'var(--text-muted)' }}>
               Run ID: <strong className="font-mono" style={{ color: '#38bdf8' }}>{agentData.run_id ? agentData.run_id.slice(0, 8) : 'ACTIVE'}</strong>
@@ -166,6 +169,29 @@ export default function Negotiation() {
           </div>
           <div style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>
             Started: {agentData.timestamp ? new Date(agentData.timestamp).toLocaleTimeString() : 'Just now'} &bull; Status: <strong style={{ color: '#34d399', textTransform: 'uppercase' }}>{agentData.status}</strong>
+          </div>
+        </div>
+      )}
+
+      {/* Gateway Architecture Notice */}
+      {agentData && (
+        <div
+          style={{
+            background: 'rgba(56, 189, 248, 0.06)',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: 'var(--radius-md)',
+            padding: '0.75rem 1.25rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            fontSize: '0.85rem',
+            color: 'var(--text-muted)',
+          }}
+        >
+          <Info size={18} color="#38bdf8" style={{ flexShrink: 0 }} />
+          <div>
+            <strong style={{ color: '#38bdf8' }}>Supplier Gateway Architecture Notice:</strong> Supplier bargaining responses are generated deterministically using vendor profile behavioral models via <code>SimulatedSupplierGateway</code>. A clean adapter interface (<code>SupplierGatewayInterface</code>) is established for plugging into live supplier APIs and electronic EDI quotation networks in production.
           </div>
         </div>
       )}
@@ -468,7 +494,7 @@ export default function Negotiation() {
                                       ) : (
                                         <>
                                           <Users size={15} color="#fbbf24" />
-                                          <span style={{ color: '#fbbf24' }}>{vendorName.toUpperCase()}</span>
+                                          <span style={{ color: '#fbbf24' }}>{vendorName.toUpperCase()} [SIMULATED]</span>
                                         </>
                                       )}
                                     </div>

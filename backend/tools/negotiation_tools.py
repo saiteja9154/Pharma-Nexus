@@ -22,20 +22,75 @@ def calculate_reservation_price(base_price: float, discount_pct: float = DEFAULT
     return round(base_price * (1.0 - discount_pct), 2)
 
 
-def get_vendor_floor_price(vendor_id: int, base_price: float) -> float:
+# Centralized configurable vendor negotiation profiles
+VENDOR_PROFILES = {
+    1: {
+        "name": "Vendor A",
+        "description": "Low-Margin Bulk Wholesale Supplier",
+        "floor_ratio": 0.96,
+        "round1_accept_ratio": 0.98,
+        "round1_counter_ratio": 0.90,
+        "round2_accept_ratio": 0.96,
+        "round2_counter_ratio": 0.90,
+    },
+    2: {
+        "name": "Vendor B",
+        "description": "Fast Delivery, Flexible Volume Margin",
+        "floor_ratio": 0.92,
+        "round1_accept_ratio": 0.95,
+        "round1_counter_ratio": 0.88,
+        "round2_accept_ratio": 0.92,
+        "round2_counter_ratio": 0.85,
+    },
+    3: {
+        "name": "Vendor C",
+        "description": "Regional Balanced Distributor",
+        "floor_ratio": 0.94,
+        "round1_accept_ratio": 0.96,
+        "round1_counter_ratio": 0.88,
+        "round2_accept_ratio": 0.94,
+        "round2_counter_ratio": 0.88,
+    },
+    4: {
+        "name": "Vendor D",
+        "description": "Generic Medicine Supplier",
+        "floor_ratio": 0.93,
+        "round1_accept_ratio": 0.95,
+        "round1_counter_ratio": 0.87,
+        "round2_accept_ratio": 0.93,
+        "round2_counter_ratio": 0.87,
+    },
+    5: {
+        "name": "Vendor E",
+        "description": "Hospital Supply Distributor",
+        "floor_ratio": 0.95,
+        "round1_accept_ratio": 0.97,
+        "round1_counter_ratio": 0.90,
+        "round2_accept_ratio": 0.95,
+        "round2_counter_ratio": 0.90,
+    },
+    6: {
+        "name": "Vendor F",
+        "description": "Specialty Pharmaceutical Supplier",
+        "floor_ratio": 0.97,
+        "round1_accept_ratio": 0.98,
+        "round1_counter_ratio": 0.92,
+        "round2_accept_ratio": 0.97,
+        "round2_counter_ratio": 0.92,
+    },
+}
+
+
+def get_vendor_floor_price(vendor_id: int, base_price: float, custom_floor_ratio: Optional[float] = None) -> float:
     """
     Calculate deterministic vendor reservation floor price based on vendor concession tolerance:
-      - Vendor A (ID 1): Low margin leader -> 4% max concession (Floor: 96%)
-      - Vendor B (ID 2): Flexible volume margin -> 8% max concession (Floor: 92%)
-      - Vendor C (ID 3): Moderate supplier -> 6% max concession (Floor: 94%)
+      - Uses configured profile floor ratio if available, or custom floor ratio.
     """
-    if vendor_id == 1:
-        return round(base_price * 0.96, 2)
-    elif vendor_id == 2:
-        return round(base_price * 0.92, 2)
-    elif vendor_id == 3:
-        return round(base_price * 0.94, 2)
-    return round(base_price * 0.90, 2)
+    if custom_floor_ratio is not None:
+        return round(base_price * custom_floor_ratio, 2)
+    profile = VENDOR_PROFILES.get(vendor_id)
+    floor = profile["floor_ratio"] if profile else 0.94
+    return round(base_price * floor, 2)
 
 
 def vendor_respond(
@@ -44,112 +99,122 @@ def vendor_respond(
     quantity: int,
     base_price: float,
     round_num: int,
+    custom_profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Deterministic Vendor Response Simulator.
     Evaluates buyer proposal against vendor pricing tolerance and returns ACCEPT, COUNTER, or REJECT.
-    
-    Vendor Profiles:
-      - Vendor A (ID 1): Low-margin leader. Concession tolerance up to 4% (Floor: 96%).
-      - Vendor B (ID 2): Fast delivery, flexible volume margins. Concession tolerance up to 8% (Floor: 92%).
-      - Vendor C (ID 3): Moderate supplier. Concession tolerance up to 6% (Floor: 94%).
+    Clearly labeled as simulated negotiation (demo mode).
     """
     ratio = offered_price / base_price if base_price > 0 else 1.0
+    profile = custom_profile or VENDOR_PROFILES.get(vendor_id) or {
+        "name": f"Vendor #{vendor_id}",
+        "floor_ratio": 0.94,
+        "round1_accept_ratio": 0.96,
+        "round1_counter_ratio": 0.88,
+        "round2_accept_ratio": 0.94,
+        "round2_counter_ratio": 0.88,
+    }
+
+    v_name = profile.get("name", f"Vendor #{vendor_id}")
+    floor = profile.get("floor_ratio", 0.94)
+    floor_price = round(base_price * floor, 2)
 
     if vendor_id == 1:
-        # Vendor A (Low Margin Leader, Floor: 96%)
+        # Vendor A: Low Margin Leader (Floor: 96%)
         if round_num == 1:
-            if ratio >= 0.98:
+            if ratio >= profile["round1_accept_ratio"]:
                 action = "ACCEPT"
                 counter_price = offered_price
-                msg = f"Vendor A accepts ${offered_price:.2f} for {quantity} units."
-            elif ratio >= 0.90:
+                msg = f"{v_name} accepts ${offered_price:.2f} for {quantity} units."
+            elif ratio >= profile["round1_counter_ratio"]:
                 action = "COUNTER"
-                counter_price = round(base_price * 0.96, 2)
-                msg = f"Vendor A: Best wholesale rate is ${counter_price:.2f} per unit."
+                counter_price = floor_price
+                msg = f"{v_name}: Best wholesale rate is ${counter_price:.2f} per unit."
             else:
                 action = "REJECT"
                 counter_price = base_price
-                msg = f"Vendor A: Offer of ${offered_price:.2f} is below cost floor. Rejected."
+                msg = f"{v_name}: Offer of ${offered_price:.2f} is below cost floor. Rejected."
         else:
-            # Round 2: Accept if buyer meets 4% discount floor
-            if ratio >= 0.96:
+            if ratio >= profile["round2_accept_ratio"]:
                 action = "ACCEPT"
                 counter_price = offered_price
-                msg = f"Vendor A accepts agreed rate of ${offered_price:.2f} per unit for {quantity} units."
-            elif ratio >= 0.90:
+                msg = f"{v_name} accepts agreed rate of ${offered_price:.2f} per unit for {quantity} units."
+            elif ratio >= profile["round2_counter_ratio"]:
                 action = "COUNTER"
-                counter_price = round(base_price * 0.96, 2)
-                msg = f"Vendor A: Final offer remains ${counter_price:.2f} per unit."
+                counter_price = floor_price
+                msg = f"{v_name}: Final offer remains ${counter_price:.2f} per unit."
             else:
                 action = "REJECT"
                 counter_price = base_price
-                msg = f"Vendor A: Counter offer rejected."
+                msg = f"{v_name}: Counter offer rejected."
 
     elif vendor_id == 2:
-        # Vendor B (Hero Vendor: Fast Delivery & Flexible Margin, Floor: 92%)
+        # Vendor B: Fast Delivery & Flexible Margin (Hero Winner, Floor: 92%)
         if round_num == 1:
-            if ratio >= 0.95:
+            if ratio >= profile["round1_accept_ratio"]:
                 action = "ACCEPT"
                 counter_price = offered_price
-                msg = f"Vendor B accepts ${offered_price:.2f} per unit. Order confirmed for {quantity} units."
-            elif ratio >= 0.88:
+                msg = f"{v_name} accepts ${offered_price:.2f} per unit. Order confirmed for {quantity} units."
+            elif ratio >= profile["round1_counter_ratio"]:
                 action = "COUNTER"
-                # Midpoint concession
                 counter_price = round((offered_price + base_price) / 2, 2)
-                msg = f"Vendor B: We can meet you halfway at ${counter_price:.2f} per unit."
+                msg = f"{v_name}: We can meet you halfway at ${counter_price:.2f} per unit."
             elif ratio >= 0.80:
                 action = "COUNTER"
-                counter_price = round(base_price * 0.92, 2)
-                msg = f"Vendor B: We can offer a volume discount at ${counter_price:.2f} per unit."
+                counter_price = floor_price
+                msg = f"{v_name}: We can offer a volume discount at ${counter_price:.2f} per unit."
             else:
                 action = "REJECT"
                 counter_price = base_price
-                msg = f"Vendor B: Offer of ${offered_price:.2f} is outside our discount policy. Rejected."
+                msg = f"{v_name}: Offer of ${offered_price:.2f} is outside our discount policy. Rejected."
         else:
-            # Round 2: Accept if buyer adapted proposal meets 8% concession floor (>= 92%)
-            if ratio >= 0.92:
+            if ratio >= profile["round2_accept_ratio"]:
                 action = "ACCEPT"
                 counter_price = offered_price
-                msg = f"Vendor B accepts buyer counter of ${offered_price:.2f} per unit. Order confirmed for {quantity} units."
-            elif ratio >= 0.85:
+                msg = f"{v_name} accepts buyer counter of ${offered_price:.2f} per unit. Order confirmed for {quantity} units."
+            elif ratio >= profile["round2_counter_ratio"]:
                 action = "COUNTER"
-                counter_price = round(base_price * 0.92, 2)
-                msg = f"Vendor B: Lowest possible rate is ${counter_price:.2f} per unit."
+                counter_price = floor_price
+                msg = f"{v_name}: Lowest possible rate is ${counter_price:.2f} per unit."
             else:
                 action = "REJECT"
                 counter_price = base_price
-                msg = f"Vendor B: Offer of ${offered_price:.2f} is rejected."
+                msg = f"{v_name}: Offer of ${offered_price:.2f} is rejected."
 
     else:
-        # Vendor C (Moderate Supplier, Floor: 94%)
+        # Generic / Vendor C / D / E / F configurable logic
+        r1_acc = profile.get("round1_accept_ratio", 0.96)
+        r1_cnt = profile.get("round1_counter_ratio", 0.88)
+        r2_acc = profile.get("round2_accept_ratio", floor)
+        r2_cnt = profile.get("round2_counter_ratio", 0.88)
+
         if round_num == 1:
-            if ratio >= 0.96:
+            if ratio >= r1_acc:
                 action = "ACCEPT"
                 counter_price = offered_price
-                msg = f"Vendor C accepts ${offered_price:.2f} per unit."
-            elif ratio >= 0.88:
+                msg = f"{v_name} accepts ${offered_price:.2f} per unit."
+            elif ratio >= r1_cnt:
                 action = "COUNTER"
-                counter_price = round(base_price * 0.94, 2)
-                msg = f"Vendor C: We counter with ${counter_price:.2f} per unit."
+                counter_price = floor_price
+                msg = f"{v_name}: We counter with ${counter_price:.2f} per unit."
             else:
                 action = "REJECT"
                 counter_price = base_price
-                msg = f"Vendor C: Offer of ${offered_price:.2f} is rejected."
+                msg = f"{v_name}: Offer of ${offered_price:.2f} is rejected."
         else:
-            # Round 2: Accept if buyer meets 6% discount floor
-            if ratio >= 0.94:
+            if ratio >= r2_acc:
                 action = "ACCEPT"
                 counter_price = offered_price
-                msg = f"Vendor C accepts rate of ${offered_price:.2f} per unit."
-            elif ratio >= 0.88:
+                msg = f"{v_name} accepts rate of ${offered_price:.2f} per unit."
+            elif ratio >= r2_cnt:
                 action = "COUNTER"
-                counter_price = round(base_price * 0.94, 2)
-                msg = f"Vendor C: Final counter is ${counter_price:.2f} per unit."
+                counter_price = floor_price
+                msg = f"{v_name}: Final counter is ${counter_price:.2f} per unit."
             else:
                 action = "REJECT"
                 counter_price = base_price
-                msg = f"Vendor C: Counter of ${offered_price:.2f} rejected."
+                msg = f"{v_name}: Counter of ${offered_price:.2f} rejected."
 
     return {
         "round": round_num,
@@ -158,6 +223,8 @@ def vendor_respond(
         "price": counter_price,
         "quantity": quantity,
         "message": msg,
+        "is_simulated": True,
+        "simulation_label": "Simulated Supplier Response (Demo Mode)",
     }
 
 

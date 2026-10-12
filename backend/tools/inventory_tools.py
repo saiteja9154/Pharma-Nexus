@@ -53,71 +53,161 @@ def calculate_need(
     current_stock: int,
     daily_sales: int,
     lead_time_days: int,
-    safety_days: int = DEFAULT_SAFETY_DAYS
-) -> Dict[str, int]:
+    safety_days: int = DEFAULT_SAFETY_DAYS,
+    outstanding_po_qty: int = 0,
+    expiry_days_left: Optional[int] = None,
+    reorder_point: Optional[int] = None,
+) -> Dict[str, Any]:
     """
-    Deterministic tool: Calculate required procurement quantity using frozen Phase 0 formula.
-    
-    Formula:
+    Deterministic procurement decision tool:
       coverage_days = lead_time_days + safety_days
       raw_need = daily_sales * coverage_days
-      required_qty = max(raw_need - current_stock, 0)
+      
+      Batch & Expiry Accounting:
+      If stock is expiring before replenishment, units sellable before expiry = daily_sales * max(0, expiry_days_left).
+      Any current_stock beyond sellable units will spoil before dispensing:
+      unusable_stock = max(0, current_stock - (daily_sales * max(0, expiry_days_left))) if expiry_days_left is not None else 0
+      usable_current_stock = max(0, current_stock - unusable_stock)
+      
+      On-Order PO Accounting:
+      outstanding_po_qty represents active POs already in transit/approval.
+      effective_inventory = usable_current_stock + outstanding_po_qty
+      
+      Reorder Trigger:
+      If reorder_point is provided:
+        needs_reorder = effective_inventory <= reorder_point
+        required_qty = max(raw_need - effective_inventory, 0) if needs_reorder else 0
+      Else:
+        required_qty = max(raw_need - effective_inventory, 0)
+        needs_reorder = required_qty > 0
     """
     coverage_days = lead_time_days + safety_days
     raw_need = daily_sales * coverage_days
-    required_qty = max(raw_need - current_stock, 0)
+    lead_time_demand = daily_sales * lead_time_days
+    safety_stock = daily_sales * safety_days
+
+    unusable_stock = 0
+    if expiry_days_left is not None:
+        if expiry_days_left < 0:
+            unusable_stock = current_stock
+        else:
+            sellable = daily_sales * expiry_days_left
+            if current_stock > sellable:
+                unusable_stock = current_stock - sellable
+
+    usable_current_stock = max(0, current_stock - unusable_stock)
+    effective_inventory = usable_current_stock + outstanding_po_qty
+
+    if reorder_point is not None:
+        needs_reorder = effective_inventory <= reorder_point
+        required_qty = max(raw_need - effective_inventory, 0) if needs_reorder else 0
+    else:
+        required_qty = max(raw_need - effective_inventory, 0)
+        needs_reorder = required_qty > 0
+
+    if not needs_reorder:
+        explanation = (
+            f"Net inventory ({effective_inventory} = stock {current_stock} + POs {outstanding_po_qty}) "
+            f"is above replenishment threshold ({reorder_point if reorder_point is not None else raw_need}). "
+            f"Procurement already active or stock adequate; 0 units needed."
+        )
+    else:
+        explanation = (
+            f"Demand: {daily_sales}/day across {coverage_days}d coverage ({lead_time_days}d lead + {safety_days}d safety buffer) "
+            f"= {raw_need} units target. Current stock: {current_stock} (usable: {usable_current_stock}) + "
+            f"incoming POs: {outstanding_po_qty} = effective stock: {effective_inventory} units. "
+            f"Deficit: {required_qty} units required."
+        )
 
     return {
         "required_qty": int(required_qty),
         "coverage_days": int(coverage_days),
         "raw_need": int(raw_need),
+        "lead_time_demand": int(lead_time_demand),
+        "safety_stock": int(safety_stock),
+        "target_stock": int(raw_need),
+        "reorder_point": int(reorder_point) if reorder_point is not None else None,
         "safety_days": int(safety_days),
+        "current_stock": int(current_stock),
+        "outstanding_po_qty": int(outstanding_po_qty),
+        "usable_current_stock": int(usable_current_stock),
+        "unusable_stock": int(unusable_stock),
+        "spoilage_risk_units": int(unusable_stock),
+        "effective_inventory": int(effective_inventory),
+        "net_available": int(effective_inventory),
+        "needs_reorder": bool(needs_reorder),
+        "explanation": explanation,
     }
 
 
 def check_expiry(
-    expiry_date_str: str,
-    daily_sales: int,
+    expiry_date_str: Optional[str] = None,
+    daily_sales: int = 1,
     reference_date: Optional[date] = None,
-    lead_time_days: int = 0
+    lead_time_days: int = 0,
+    current_stock: Optional[int] = None,
+    days_left: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Deterministic tool: Check expiry constraint for a medicine.
+    Deterministic tool: Check expiry constraint and shelf-life capacity for a medicine.
     
     Calculates:
       - expiry_days_left: days from reference_date to expiry_date
       - expiry_safe_qty: daily_sales * expiry_days_left (maximum units sellable before expiry)
       - expiry_risk: boolean flag indicating if stock expires before delivery or within 30 days
+      - estimated_consumption_before_expiry: daily_sales * max(0, days_left)
+      - spoilage_risk_units: units at risk of expiring if current_stock exceeds consumption
     """
     ref_date = reference_date if reference_date is not None else date.today()
 
-    try:
-        exp_date = datetime.strptime(str(expiry_date_str).strip(), "%Y-%m-%d").date()
-    except (ValueError, TypeError):
-        return {
-            "expiry_days_left": 0,
-            "expiry_safe_qty": 0,
-            "expiry_risk": True,
-            "error": f"Invalid expiry date format: '{expiry_date_str}'. Expected YYYY-MM-DD.",
-        }
+    if days_left is not None:
+        computed_days = int(days_left)
+    elif expiry_date_str:
+        try:
+            exp_date = datetime.strptime(str(expiry_date_str).strip(), "%Y-%m-%d").date()
+            computed_days = (exp_date - ref_date).days
+        except (ValueError, TypeError):
+            return {
+                "expiry_days_left": 0,
+                "expiry_safe_qty": 0,
+                "expiry_risk": True,
+                "estimated_consumption_before_expiry": 0,
+                "spoilage_risk_units": current_stock or 0,
+                "error": f"Invalid expiry date format: '{expiry_date_str}'. Expected YYYY-MM-DD.",
+                "explanation": "Invalid expiry date format. Urgent inspection required.",
+            }
+    else:
+        computed_days = 999
 
-    days_left = (exp_date - ref_date).days
+    days_left = computed_days
 
     if days_left <= 0:
         return {
             "expiry_days_left": days_left,
             "expiry_safe_qty": 0,
             "expiry_risk": True,
+            "estimated_consumption_before_expiry": 0,
+            "spoilage_risk_units": current_stock or 0,
+            "explanation": f"Batch expired ({abs(days_left)} days ago). Urgent write-off required.",
         }
 
     expiry_safe_qty = daily_sales * days_left
-    # Expiry risk is flagged if expiring within 30 days or within the supplier lead time
     expiry_risk = days_left < 30 or days_left <= lead_time_days
+    estimated_consumption = daily_sales * days_left
+    spoilage_units = max(0, (current_stock - estimated_consumption)) if current_stock is not None else 0
+
+    explanation = (
+        f"{days_left} days until expiry. Dispensing capacity: {expiry_safe_qty} units "
+        f"at {daily_sales}/day. Expiry risk: {'HIGH' if expiry_risk else 'LOW'}."
+    )
 
     return {
         "expiry_days_left": days_left,
         "expiry_safe_qty": int(expiry_safe_qty),
         "expiry_risk": bool(expiry_risk),
+        "estimated_consumption_before_expiry": int(estimated_consumption),
+        "spoilage_risk_units": int(spoilage_units),
+        "explanation": explanation,
     }
 
 
@@ -264,5 +354,41 @@ def add_inventory_item(
         "lead_time_days": lead_time_days,
         "expiry_date": expiry_str,
     }
+
+
+def get_inventory_item(med_id: int, db_path: Optional[Path | str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single medicine record from SQLite inventory table."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT med_id, name, current_stock, reorder_point, daily_sales, lead_time_days, expiry_date
+        FROM inventory
+        WHERE med_id = ?
+        """,
+        (med_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_inventory_batches(med_id: int, db_path: Optional[Path | str] = None) -> List[Dict[str, Any]]:
+    """Retrieve all recorded batches for a specific medicine."""
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT batch_id, med_id, batch_number, quantity, expiry_date, received_at
+        FROM inventory_batches
+        WHERE med_id = ?
+        ORDER BY expiry_date ASC
+        """,
+        (med_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 

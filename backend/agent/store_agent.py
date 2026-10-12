@@ -34,7 +34,7 @@ try:
         validate_deal,
         calculate_deal_savings,
     )
-    from tools.purchase_order_tools import create_purchase_order_transaction
+    from tools.purchase_order_tools import create_purchase_order_transaction, get_outstanding_po_qty
 except ImportError:
     from backend.tools.inventory_tools import (
         get_inventory,
@@ -57,7 +57,7 @@ except ImportError:
         validate_deal,
         calculate_deal_savings,
     )
-    from backend.tools.purchase_order_tools import create_purchase_order_transaction
+    from backend.tools.purchase_order_tools import create_purchase_order_transaction, get_outstanding_po_qty
 
 
 
@@ -751,8 +751,33 @@ class StoreAgent:
         )
 
         # Step 2: Observe and Reason on Stock Level
+        # Check active outstanding PO quantity to prevent over-purchasing and duplicate orders
+        outstanding_po = get_outstanding_po_qty(med_id, self.db_path)
+
+        # Check batch expiry constraint
+        exp_action = AgentAction(
+            action=AgentActionType.CHECK_EXPIRY.value,
+            medicine_id=med_id,
+            reason="Check batch shelf life and maximum safe quantity before replenishment.",
+            params={
+                "expiry_date": expiry_date,
+                "daily_sales": daily_sales,
+                "lead_time_days": lead_time_days,
+            },
+        )
+        expiry_result = check_expiry(
+            expiry_date_str=expiry_date,
+            daily_sales=daily_sales,
+            lead_time_days=lead_time_days,
+            current_stock=current_stock,
+        )
+        exp_action.result = expiry_result
+        self.record_action(exp_action)
+
+        days_left = expiry_result.get("expiry_days_left")
+
         if current_stock < reorder_point:
-            # Step 3: Act - Calculate required quantity
+            # Step 3: Act - Calculate required quantity (incorporating on-order POs)
             calc_action = AgentAction(
                 action=AgentActionType.CALCULATE_NEED.value,
                 medicine_id=med_id,
@@ -762,6 +787,7 @@ class StoreAgent:
                     "daily_sales": daily_sales,
                     "lead_time_days": lead_time_days,
                     "safety_days": self.safety_days,
+                    "outstanding_po_qty": outstanding_po,
                 },
             )
             need_result = calculate_need(
@@ -769,28 +795,58 @@ class StoreAgent:
                 daily_sales=daily_sales,
                 lead_time_days=lead_time_days,
                 safety_days=self.safety_days,
+                outstanding_po_qty=outstanding_po,
+                expiry_days_left=days_left,
             )
             calc_action.result = need_result
             self.record_action(calc_action)
 
-            # Step 4: Act - Check expiry constraint
-            exp_action = AgentAction(
-                action=AgentActionType.CHECK_EXPIRY.value,
-                medicine_id=med_id,
-                reason="Check batch shelf life and maximum safe quantity before replenishment.",
-                params={
-                    "expiry_date": expiry_date,
-                    "daily_sales": daily_sales,
-                    "lead_time_days": lead_time_days,
-                },
-            )
-            expiry_result = check_expiry(
-                expiry_date_str=expiry_date,
-                daily_sales=daily_sales,
-                lead_time_days=lead_time_days,
-            )
-            exp_action.result = expiry_result
-            self.record_action(exp_action)
+            # Check if outstanding POs already fulfill the reorder requirement
+            if need_result["required_qty"] == 0 and outstanding_po > 0:
+                raw_quotes = get_vendor_quotes(med_id=med_id, required_qty=0, db_path=self.db_path)
+                state.required_qty = 0
+                state.constraints = {
+                    "safety_days": self.safety_days,
+                    "coverage_days": need_result["coverage_days"],
+                    "raw_need": need_result["raw_need"],
+                    "expiry": expiry_result,
+                    "outstanding_po_qty": outstanding_po,
+                    "effective_inventory": need_result["effective_inventory"],
+                }
+                state.vendor_quotes = score_quotes(raw_quotes, expiry_safe_qty=expiry_result.get("expiry_safe_qty"))
+                state.selected_vendor = None
+                state.negotiation = {
+                    "status": "ORDER_ALREADY_ACTIVE",
+                    "reason": f"Active POs already provide {outstanding_po} units in transit.",
+                }
+                state.negotiation_history = []
+                state.best_offer = None
+                state.validation_result = {
+                    "valid": True,
+                    "checks": {
+                        "required_qty": True,
+                        "moq": True,
+                        "expiry": True,
+                        "price": True,
+                        "delivery": True,
+                        "vendor": True,
+                        "negotiation_status": True,
+                    },
+                    "failed_checks": [],
+                    "reason": f"Active procurement already underway ({outstanding_po} units on order).",
+                }
+                state.savings = None
+                state.decision = "NO_ORDER"
+                state.decision_reason = (
+                    f"Procurement already active: {outstanding_po} units on order across active purchase orders "
+                    f"(Current stock: {current_stock}, Reorder threshold: {reorder_point}). Duplicate order suppressed."
+                )
+                self.log(
+                    "DEDUPLICATE",
+                    f"{med_name}: {outstanding_po} units already on order. Duplicate order suppressed."
+                )
+                self.states[med_id] = state
+                return state
 
             # Update State with quantity and constraints
             state.required_qty = need_result["required_qty"]
@@ -799,12 +855,14 @@ class StoreAgent:
                 "coverage_days": need_result["coverage_days"],
                 "raw_need": need_result["raw_need"],
                 "expiry": expiry_result,
+                "outstanding_po_qty": outstanding_po,
+                "effective_inventory": need_result["effective_inventory"],
             }
 
             self.log(
                 "CALCULATE",
                 f"{med_name} (ID: {med_id}) requires {state.required_qty} units. "
-                f"[Stock: {current_stock}, Reorder Point: {reorder_point}, Coverage: {need_result['coverage_days']} days]"
+                f"[Stock: {current_stock}, Reorder Point: {reorder_point}, Coverage: {need_result['coverage_days']} days, Incoming: {outstanding_po}]"
             )
             self.log(
                 "VERIFY",

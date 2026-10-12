@@ -9,11 +9,12 @@ Implements deterministic, multi-factor evaluation of vendor quotes based on:
 
 from typing import List, Dict, Any, Optional, Tuple
 
-# Default explainable scoring weights
+# Default explainable scoring weights (Configurable per pharmacy procurement policy)
 DEFAULT_WEIGHTS = {
     "price": 0.45,
     "delivery": 0.35,
     "moq": 0.20,
+    "reliability": 0.00,  # 0.0 by default to preserve baseline hero score calibration; configurable up to 1.0
 }
 
 
@@ -63,15 +64,23 @@ def score_quotes(
     Score and rank a collection of vendor quotes for a specific medicine.
     
     Scoring Model:
-      - Price Score (45%): 1.0 - (price - min_price) / (max_price - min_price)
-      - Delivery Score (35%): 1.0 - (delivery - min_delivery) / (max_delivery - min_delivery)
-      - MOQ Efficiency (20%): required_qty / offered_qty (penalizes excess mandatory buffer)
+      - Price Score (e.g. 45%): 1.0 - (price - min_price) / (max_price - min_price)
+      - Delivery Score (e.g. 35%): 1.0 - (delivery - min_delivery) / (max_delivery - min_delivery)
+      - MOQ Efficiency (e.g. 20%): required_qty / offered_qty (penalizes excess mandatory buffer)
+      - Supplier Reliability (configurable, e.g. 15%): supplier track record / fulfillment SLA
       - Feasibility: Infeasible quotes receive score = 0.0
     """
     if not quotes:
         return []
 
-    w = weights or DEFAULT_WEIGHTS
+    # Merge weights with defaults
+    raw_w = dict(DEFAULT_WEIGHTS)
+    if weights:
+        raw_w.update(weights)
+
+    # Normalize weights so sum equals 1.0
+    total_w = sum(raw_w.values())
+    w = {k: (v / total_w) for k, v in raw_w.items()} if total_w > 0 else raw_w
 
     # Extract bounds across candidate quotes for relative normalization
     prices = [q["base_price"] for q in quotes]
@@ -102,12 +111,16 @@ def score_quotes(
         off_qty = q.get("offered_qty", 1)
         moq_score = min(1.0, req_qty / off_qty) if off_qty > 0 else 0.0
 
+        # 4. Supplier Reliability Score
+        rel_score = float(q.get("reliability", 0.95))
+
         # Composite Score
         if feasible:
             raw_score = (
-                w["price"] * p_score +
-                w["delivery"] * d_score +
-                w["moq"] * moq_score
+                w.get("price", 0.45) * p_score +
+                w.get("delivery", 0.35) * d_score +
+                w.get("moq", 0.20) * moq_score +
+                w.get("reliability", 0.00) * rel_score
             ) * 100.0
             final_score = round(raw_score, 2)
         else:
@@ -133,6 +146,9 @@ def score_quotes(
             else:
                 reasons.append(f"MOQ requires {q['offered_qty']} units (needed: {q['required_qty']})")
 
+            if "reliability" in q:
+                reasons.append(f"Supplier reliability: {int(rel_score * 100)}%")
+
         scored_item = dict(q)
         scored_item.update(
             {
@@ -141,6 +157,13 @@ def score_quotes(
                 "price_score": round(p_score, 3),
                 "delivery_score": round(d_score, 3),
                 "moq_score": round(moq_score, 3),
+                "reliability_score": round(rel_score, 3),
+                "score_breakdown": {
+                    "price": round(p_score * 100.0, 1),
+                    "delivery": round(d_score * 100.0, 1),
+                    "moq": round(moq_score * 100.0, 1),
+                    "reliability": round(rel_score * 100.0, 1),
+                },
                 "reasons": reasons,
                 "infeasible_reasons": violations,
             }
