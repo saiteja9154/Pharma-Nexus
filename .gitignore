@@ -98,6 +98,9 @@ desktop.ini
 
 .vscode/
 .idea/
+pyrightconfig.json
+pyrefly.toml
+.pyrefly/
 
 # =========================
 

@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/React-18.3.1-61DAFB.svg?logo=react&logoColor=black)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.4.2-646CFF.svg?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57.svg?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![pytest](https://img.shields.io/badge/pytest-82%20passed-brightgreen.svg?logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![pytest](https://img.shields.io/badge/pytest-114%20passed-brightgreen.svg?logo=pytest&logoColor=white)](https://docs.pytest.org/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white)](https://python.org)
 
 > **Pharma Nexus V2** is an end-to-end autonomous procurement agent that observes live pharmacy inventory, evaluates replenishment demand against shelf-life expiry, discovers vendor offerings, negotiates volume discounts via multi-round adaptive bargaining, validates deal constraints, and atomically commits purchase orders back to the ERP.
@@ -202,25 +202,29 @@ COMMIT;
 ---
 
 ## 🧪 Testing & Quality Assurance
-The codebase is validated by **82 automated tests** covering all layers:
+The codebase is validated by **114 automated tests** covering all layers:
 
 ```
-collected 82 items
+collected 114 items
 
-tests/test_agent.py .....................                                [ 25%]
-tests/test_inventory.py .........                                        [ 36%]
-tests/test_phase8_hero_validation.py ............                        [ 51%]
-tests/test_purchase_order.py ...............                             [ 69%]
-tests/test_validator.py ..............                                   [ 86%]
+tests/test_agent.py .........................                            [ 21%]
+tests/test_editable_master_data.py ............                          [ 32%]
+tests/test_inventory.py .........                                        [ 40%]
+tests/test_phase8_hero_validation.py ............                        [ 50%]
+tests/test_procurement_upgrade.py ................                       [ 64%]
+tests/test_purchase_order.py ...............                             [ 78%]
+tests/test_validator.py ..............                                   [ 90%]
 tests/test_vendor.py ...........                                         [100%]
 
-======================== 82 passed, 1 warning in 2.90s ========================
+====================== 114 passed, 1 warning in 7.74s ======================
 ```
 
-* **`test_agent.py` (21 tests):** Agent state machine, lifecycle transitions, bargaining loop.
+* **`test_agent.py` (25 tests):** Agent state machine, lifecycle transitions, bargaining loop.
+* **`test_editable_master_data.py` (12 tests):** Master data expansion, inventory batches, vendor catalogs.
 * **`test_inventory.py` (9 tests):** Inventory observation, demand formulas, expiry constraints.
-* **`test_phase8_hero_validation.py` (12 tests):** End-to-end Hero audits, ZOPA bounds, decision branches, duplicate execution safety, rollback verification.
-* **`test_purchase_order.py` (15 tests):** Atomic PO transactions, inventory write-back.
+* **`test_phase8_hero_validation.py` (12 tests):** End-to-end Hero audits, ZOPA bounds, decision branches, duplicate execution safety.
+* **`test_procurement_upgrade.py` (16 tests):** Real-world procurement upgrade, reliability scoring, on-order PO deduplication, simulated supplier gateways.
+* **`test_purchase_order.py` (15 tests):** Safe PO lifecycle (`DRAFT` → `RECEIVED`), physical goods receipts, batch increments.
 * **`test_validator.py` (14 tests):** 7-constraint validator edge cases and savings math.
 * **`test_vendor.py` (11 tests):** Vendor quote querying, MOQ flooring, normalized multi-factor scoring.
 
@@ -247,36 +251,40 @@ pharma-procurement-agent/
 │   │   └── store_agent.py          # Store Procurement Agent controller & AgentState
 │   ├── database/
 │   │   ├── db.py                   # SQLite connection, schemas & initialization
-│   │   └── seed.py                 # Deterministic baseline seed data
+│   │   └── seed.py                 # Master seed data (18 medicines, 6 suppliers, 98 contracts)
 │   ├── tools/
-│   │   ├── inventory_tools.py      # Stock observation, need & expiry formulas
+│   │   ├── inventory_tools.py      # Stock observation, need, on-order PO deduction & expiry formulas
 │   │   ├── vendor_tools.py         # Vendor quote querying & MOQ rules
-│   │   ├── deal_scoring.py         # Multi-factor quote scoring engine
-│   │   ├── negotiation_tools.py    # Adaptive bargaining engine & vendor simulation
+│   │   ├── deal_scoring.py         # Reliability-adjusted multi-factor quote scoring engine
+│   │   ├── negotiation_tools.py    # Adaptive bargaining engine & reservation pricing
+│   │   ├── supplier_gateway.py     # Supplier gateway abstraction & transparent simulated adapter
 │   │   ├── validator.py            # Independent 7-constraint deal validator
-│   │   └── purchase_order_tools.py # Atomic PO transactions & ERP write-back
+│   │   └── purchase_order_tools.py # PO lifecycle management & physical goods receiving
 │   ├── main.py                     # FastAPI application & REST endpoints
-│   └── requirements.txt            # Python dependencies
+│   ├── requirements.txt            # Python dependencies
+│   └── verify_expansion.py         # Master dataset & pricing integrity validation script
 ├── data/
 │   └── pharmacy.db                 # SQLite database file
 ├── frontend/
 │   ├── src/
 │   │   ├── components/Navbar.jsx   # Top navigation header
 │   │   ├── pages/
-│   │   │   ├── Inventory.jsx       # Medicine stock & reorder monitor
-│   │   │   ├── Vendors.jsx         # Vendor catalogue & offerings
-│   │   │   ├── AgentControl.jsx    # Autonomous agent control center & logs
+│   │   │   ├── Inventory.jsx       # Medicine stock, reorder monitor & lot batch view
+│   │   │   ├── Vendors.jsx         # Vendor catalogue, reliability ratings & quote comparison
+│   │   │   ├── AgentControl.jsx    # Autonomous agent control center & explainable breakdown
 │   │   │   ├── Negotiation.jsx     # Live bargaining dialogue & analytics
-│   │   │   └── PurchaseOrders.jsx  # Executed PO ledger & ERP records
+│   │   │   └── PurchaseOrders.jsx  # Executed PO lifecycle & goods receipt inspection
 │   │   ├── App.jsx                 # Main application shell
 │   │   └── index.css               # Glassmorphic CSS design system
 │   ├── package.json                # Frontend dependencies & scripts
 │   └── vite.config.js              # Vite configuration
 ├── tests/
 │   ├── test_agent.py               # Agent state machine & lifecycle tests
+│   ├── test_editable_master_data.py # Master data expansion & inventory batch tests
 │   ├── test_inventory.py           # Inventory tool tests
 │   ├── test_phase8_hero_validation.py # Complete Hero scenario audit tests
-│   ├── test_purchase_order.py      # Transaction & write-back tests
+│   ├── test_procurement_upgrade.py # Real-world procurement upgrade tests
+│   ├── test_purchase_order.py      # PO lifecycle & physical goods receiving tests
 │   ├── test_validator.py           # 7-constraint validator tests
 │   └── test_vendor.py              # Vendor quote & scoring tests
 ├── PHARMA_NEXUS_FINAL_DOCUMENTATION.md # Detailed specification & architecture doc
